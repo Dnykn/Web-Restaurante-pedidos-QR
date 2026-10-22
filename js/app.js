@@ -479,6 +479,8 @@ function watchTableAccount() {
     syncOrderPanel();
   }, (error) => {
     console.error('No se pudo seguir la visita de esta mesa.', error);
+    orderTrackingError = true;
+    syncOrderPanel();
   });
 }
 
@@ -640,11 +642,12 @@ function startApp() {
     const firestore = import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
     return firestore.then((api) => {
       services = { ...firebase, firestore: api }; connectMenu(); listenToServiceCharge(); renderCart();
-      waitForCustomerAuth().then(async (user) => {
-        if (!user) return;
+      getCustomer().then(async () => {
         watchTableAccount();
         if (customerRequestId) subscribeCustomerRequest();
-      }).catch((error) => console.error('No se pudo recuperar la sesión de cliente.', error));
+      }).catch((error) => {
+        console.error('No se pudo iniciar la sesión de cliente.', error);
+      });
     });
   }).catch((error) => {
     console.error('No se pudieron iniciar los servicios de Firebase.', error);
