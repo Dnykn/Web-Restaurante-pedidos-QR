@@ -484,6 +484,14 @@ function watchTableAccount() {
   });
 }
 
+function reconnectOrderTracking() {
+  if (document.visibilityState === 'hidden' || !visitId) return;
+  if (stopOrders) stopOrders();
+  stopOrders = null;
+  trackedVisitId = null;
+  startOrderTracking(visitId);
+}
+
 function listenToServiceCharge() {
   const { doc, onSnapshot } = services.firestore;
   return onSnapshot(doc(services.db, 'settings', 'restaurant'), (snapshot) => {
@@ -626,10 +634,13 @@ function startApp() {
   $('#cancel-request').addEventListener('click', cancelCustomerRequest);
   $('#dismiss-message').addEventListener('click', () => $('#message-dialog').close());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'hidden') return;
-    for (const dialog of [productDialog, $('#message-dialog')]) {
-      if (dialog.open) dialog.close();
+    if (document.visibilityState === 'hidden') {
+      for (const dialog of [productDialog, $('#message-dialog')]) {
+        if (dialog.open) dialog.close();
+      }
+      return;
     }
+    reconnectOrderTracking();
   });
   window.addEventListener('pageshow', () => {
     for (const dialog of [productDialog, $('#message-dialog')]) {
@@ -637,7 +648,10 @@ function startApp() {
     }
   });
   window.addEventListener('offline', () => showToast('Sin conexión. Tu carrito se conserva en este dispositivo.'));
-  window.addEventListener('online', () => showToast('Conexión recuperada. Puedes reintentar la operación.'));
+  window.addEventListener('online', () => {
+    reconnectOrderTracking();
+    showToast('Conexión recuperada. Puedes reintentar la operación.');
+  });
   import('./firebase.js').then((firebase) => {
     const firestore = import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
     return firestore.then((api) => {
