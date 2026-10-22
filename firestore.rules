@@ -1,0 +1,295 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isStaff() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/staffUsers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data.role == 'staff'
+        && get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data.enabled == true;
+    }
+
+    function isAnonymousCustomer() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function hasQrAccessToVisit(visit, visitId) {
+      return (visit.qrAccessToken is string
+          && exists(/databases/$(database)/documents/tableAccess/$(visit.qrAccessToken))
+          && get(/databases/$(database)/documents/tableAccess/$(visit.qrAccessToken)).data.activeVisitId == visitId)
+        || (exists(/databases/$(database)/documents/tables/$(visit.tableId))
+          && get(/databases/$(database)/documents/tables/$(visit.tableId)).data.activeVisitId == visitId);
+    }
+
+    match /staffUsers/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
+    }
+
+    match /platillos/{itemId} {
+      allow get, list: if isStaff() || resource.data.available == true;
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly([
+          'name', 'description', 'category', 'priceCents', 'imageUrl',
+          'customizationOptions', 'available', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'name', 'description', 'category', 'priceCents', 'imageUrl',
+          'customizationOptions', 'available', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.category in ['Entradas', 'Platos fuertes', 'Postres', 'Bebidas', 'Alcohol', 'Niños']
+        && request.resource.data.priceCents is int
+        && request.resource.data.priceCents > 0
+        && request.resource.data.priceCents <= 10000000
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.size() <= 1000
+        && (request.resource.data.imageUrl == '' || request.resource.data.imageUrl.matches('https://.*'))
+        && request.resource.data.customizationOptions is list
+        && request.resource.data.available is bool
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'description', 'category', 'priceCents', 'imageUrl',
+          'customizationOptions', 'available', 'updatedAt'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.category in ['Entradas', 'Platos fuertes', 'Postres', 'Bebidas', 'Alcohol', 'Niños']
+        && request.resource.data.priceCents is int
+        && request.resource.data.priceCents > 0
+        && request.resource.data.priceCents <= 10000000
+        && request.resource.data.imageUrl is string
+        && request.resource.data.imageUrl.size() <= 1000
+        && (request.resource.data.imageUrl == '' || request.resource.data.imageUrl.matches('https://.*'))
+        && request.resource.data.customizationOptions is list
+        && request.resource.data.available is bool
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isStaff();
+    }
+
+    // Keep this document limited to public display settings such as serviceChargeBps.
+    match /settings/restaurant {
+      allow get: if true;
+      allow list, create, update, delete: if false;
+    }
+
+    match /visits/{visitId} {
+      allow get: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids)
+        || (isAnonymousCustomer()
+          && hasQrAccessToVisit(resource.data, visitId));
+      allow list: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids);
+      allow create: if isStaff()
+        && request.resource.data.tableId is string
+        && request.resource.data.status == 'open'
+        && request.resource.data.customerUids is list
+        && request.resource.data.startedAt == request.time
+        && request.resource.data.updatedAt == request.time
+        || (isAnonymousCustomer()
+          && request.resource.data.tableId is string
+          && request.resource.data.status == 'open'
+          && request.resource.data.customerUids == [request.auth.uid]
+          && request.resource.data.qrAccessToken is string
+          && exists(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrAccessToken))
+          && getAfter(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrAccessToken)).data.activeVisitId == visitId
+          && get(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrAccessToken)).data.enabled == true
+          && get(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrAccessToken)).data.tableId == request.resource.data.tableId
+          && request.resource.data.startedAt == request.time
+          && request.resource.data.updatedAt == request.time);
+      allow update: if isStaff()
+        || (isAnonymousCustomer()
+          && resource.data.status == 'open'
+          && request.resource.data.status == 'open'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['customerUids', 'updatedAt'])
+          && request.resource.data.customerUids is list
+          && request.auth.uid in request.resource.data.customerUids
+          && request.resource.data.customerUids.hasAll(resource.data.customerUids)
+          && request.resource.data.customerUids.size() <= resource.data.customerUids.size() + 1
+          && hasQrAccessToVisit(resource.data, visitId)
+          && request.resource.data.updatedAt == request.time);
+      allow delete: if false;
+    }
+
+    match /tableAccess/{token} {
+      allow get: if isStaff() || isAnonymousCustomer();
+      allow list: if false;
+      allow create, update: if isStaff()
+        && request.resource.data.keys().hasOnly(['tableId', 'activeVisitId', 'enabled', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['tableId', 'activeVisitId', 'enabled', 'updatedAt'])
+        && request.resource.data.tableId is string
+        && (request.resource.data.activeVisitId == null || request.resource.data.activeVisitId is string)
+        && request.resource.data.enabled is bool
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAnonymousCustomer()
+        && resource.data.enabled == true
+        && request.resource.data.enabled == true
+        && request.resource.data.tableId == resource.data.tableId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeVisitId', 'updatedAt'])
+        && request.resource.data.activeVisitId is string
+        && existsAfter(/databases/$(database)/documents/visits/$(request.resource.data.activeVisitId))
+        && getAfter(/databases/$(database)/documents/visits/$(request.resource.data.activeVisitId)).data.status == 'open'
+        && getAfter(/databases/$(database)/documents/visits/$(request.resource.data.activeVisitId)).data.qrAccessToken == token
+        && getAfter(/databases/$(database)/documents/visits/$(request.resource.data.activeVisitId)).data.tableId == resource.data.tableId
+        && request.auth.uid in getAfter(/databases/$(database)/documents/visits/$(request.resource.data.activeVisitId)).data.customerUids
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isStaff();
+    }
+
+    match /tables/{tableId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly([
+          'number', 'enabled', 'activeVisitId', 'qrToken', 'qrTokenHash', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'number', 'enabled', 'activeVisitId', 'qrToken', 'qrTokenHash', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.number is int
+        && request.resource.data.number > 0
+        && request.resource.data.number <= 999
+        && request.resource.data.enabled == true
+        && request.resource.data.activeVisitId == null
+        && request.resource.data.qrToken is string
+        && request.resource.data.qrToken.size() >= 32
+        && request.resource.data.qrTokenHash is string
+        && request.resource.data.qrTokenHash.matches('^[a-fA-F0-9]{64}$')
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isStaff()
+        && request.resource.data.updatedAt == request.time
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeVisitId', 'updatedAt'])
+          || (request.resource.data.activeVisitId == resource.data.activeVisitId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qrToken', 'qrTokenHash', 'updatedAt'])
+            && request.resource.data.qrToken is string
+            && request.resource.data.qrToken.size() >= 32
+            && request.resource.data.qrTokenHash is string
+            && request.resource.data.qrTokenHash.matches('^[a-fA-F0-9]{64}$')));
+      allow delete: if isStaff() && resource.data.activeVisitId == null;
+    }
+
+    match /orders/{orderId} {
+      allow get: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids);
+      allow list: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids);
+      // The same browser origin shares Firebase Auth between staff and menu tabs.
+      // A staff session may therefore place a QR order too, but it must still
+      // match an enabled QR, its open visit, and the visit's table/customer UID.
+      allow create: if (isAnonymousCustomer() || isStaff())
+        && request.resource.data.keys().hasOnly([
+          'visitId', 'tableId', 'qrToken', 'createdBy', 'customerUids', 'orderNumber', 'status',
+          'items', 'subtotalCents', 'serviceChargeCents', 'totalCents',
+          'createdAt', 'updatedAt', 'receivedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'visitId', 'tableId', 'qrToken', 'createdBy', 'customerUids', 'orderNumber', 'status',
+          'items', 'subtotalCents', 'serviceChargeCents', 'totalCents',
+          'createdAt', 'updatedAt', 'receivedAt'
+        ])
+        && request.resource.data.visitId is string
+        && request.resource.data.qrToken is string
+        && exists(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrToken))
+        && get(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrToken)).data.enabled == true
+        && get(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrToken)).data.activeVisitId == request.resource.data.visitId
+        && get(/databases/$(database)/documents/tableAccess/$(request.resource.data.qrToken)).data.tableId == request.resource.data.tableId
+        && exists(/databases/$(database)/documents/visits/$(request.resource.data.visitId))
+        && get(/databases/$(database)/documents/visits/$(request.resource.data.visitId)).data.status == 'open'
+        && get(/databases/$(database)/documents/visits/$(request.resource.data.visitId)).data.tableId == request.resource.data.tableId
+        && request.auth.uid in get(/databases/$(database)/documents/visits/$(request.resource.data.visitId)).data.customerUids
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.customerUids == [request.auth.uid]
+        && request.resource.data.orderNumber is string
+        && request.resource.data.status == 'recibido'
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 50
+        && request.resource.data.subtotalCents is int
+        && request.resource.data.subtotalCents > 0
+        && request.resource.data.serviceChargeCents is int
+        && request.resource.data.serviceChargeCents >= 0
+        && request.resource.data.totalCents == request.resource.data.subtotalCents + request.resource.data.serviceChargeCents
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.receivedAt == request.time;
+      allow update: if isStaff()
+        && ((request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'preparingAt', 'readyAt', 'deliveredAt', 'updatedAt', 'updatedBy'
+            ])
+            && request.resource.data.updatedBy == request.auth.uid
+            && ((resource.data.status == 'recibido'
+                  && request.resource.data.status == 'en_preparacion'
+                  && request.resource.data.preparingAt == request.time)
+              || (resource.data.status == 'en_preparacion'
+                  && request.resource.data.status == 'listo'
+                  && request.resource.data.readyAt == request.time)
+              || (resource.data.status == 'listo'
+                  && request.resource.data.status == 'entregado'
+                  && request.resource.data.deliveredAt == request.time)))
+          || (resource.data.status == 'entregado'
+            && resource.data.paymentStatus != 'paid'
+            && request.resource.data.paymentStatus == 'paid'
+            && request.resource.data.paymentId is string
+            && request.resource.data.paidAt == request.time
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId', 'paidAt', 'updatedAt'])));
+      allow delete: if false;
+
+      match /statusHistory/{eventId} {
+        allow get, list: if isStaff();
+        allow create, update, delete: if false;
+      }
+    }
+
+    match /assistanceRequests/{requestId} {
+      allow get, list: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids);
+      allow create: if signedIn();
+      allow update: if (isStaff()
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'attendedAt', 'attendedBy', 'resolvedByPaymentId', 'updatedAt'])
+          && ((resource.data.status == 'pending' && request.resource.data.status == 'attended')
+            || (resource.data.type == 'bill' && request.resource.data.status == 'attended')))
+        || ((isAnonymousCustomer() || isStaff())
+          && request.auth.uid in resource.data.customerUids
+          && resource.data.status == 'pending'
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'updatedAt'])
+          && request.resource.data.cancelledAt == request.time
+          && request.resource.data.updatedAt == request.time);
+      allow delete: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly([
+          'visitId', 'tableId', 'amountCents', 'method', 'status', 'createdAt', 'recordedBy', 'recordedByEmail'
+        ])
+        && request.resource.data.visitId is string
+        && request.resource.data.tableId is string
+        && request.resource.data.amountCents is int
+        && request.resource.data.amountCents > 0
+        && request.resource.data.method in ['cash', 'other_physical']
+        && request.resource.data.status == 'recorded'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.recordedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Deny any collection not explicitly listed above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

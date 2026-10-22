@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#173d34">
+    <title>MesaExpress · Personal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/styles.css">
+  </head>
+  <body class="staff-page">
+    <header class="staff-topbar"><a class="brand" href="./index.html"><span class="brand-mark">M</span><span class="brand-name">mesa<span>express</span></span></a><span class="staff-label">ESPACIO DEL EQUIPO</span></header>
+    <main class="staff-main">
+      <section id="login-panel" class="login-panel" aria-labelledby="login-title">
+        <p class="eyebrow">ACCESO DEL PERSONAL</p><h1 id="login-title">Qué bueno verte.</h1><p class="login-intro">Inicia sesión para ver los pedidos de tu restaurante.</p>
+        <form id="login-form" class="login-form">
+          <label for="staff-email">Correo electrónico</label><input id="staff-email" name="email" type="email" autocomplete="username" required>
+          <label for="staff-password">Contraseña</label><input id="staff-password" name="password" type="password" autocomplete="current-password" required>
+          <p id="login-error" class="login-error" role="alert" aria-live="polite"></p>
+          <button id="login-button" class="staff-primary" type="submit">Iniciar sesión <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="login-footnote">Acceso reservado a la cuenta autorizada del personal.</p>
+      </section>
+
+      <section id="staff-app" class="staff-app" hidden>
+        <header class="dashboard-header"><div><p class="eyebrow">COCINA Y SERVICIO</p><h1 id="dashboard-title">Órdenes</h1><p id="staff-welcome" class="staff-welcome"></p></div><div class="dashboard-actions"><span id="connection-state" class="connection-state"><i></i> En vivo</span><button id="enable-sounds" class="sound-toggle sound-toggle-off" type="button" aria-pressed="false"><span class="sound-toggle-icon" aria-hidden="true">♫</span><span><strong>Sonido desactivado</strong><small>Haz clic para activarlo</small></span><span class="sound-switch" aria-hidden="true"></span></button><button id="sign-out" class="sign-out-button" type="button">Cerrar sesión</button></div></header>
+        <div id="staff-notification" class="staff-notification" role="status" aria-live="polite" hidden></div>
+        <div class="staff-tabs" role="tablist" aria-label="Secciones del panel"><button class="staff-tab staff-tab-active" type="button" role="tab" aria-selected="true" data-section="orders">Órdenes</button><button class="staff-tab" type="button" role="tab" aria-selected="false" data-section="tables">Mesas activas <span id="table-reminder-count" class="tab-count" hidden>0</span></button><button class="staff-tab" type="button" role="tab" aria-selected="false" data-section="requests">Solicitudes <span id="request-count" class="tab-count" hidden>0</span></button><button class="staff-tab" type="button" role="tab" aria-selected="false" data-section="menu">Platillos</button></div>
+        <section class="orders-workspace" aria-label="Gestión de órdenes">
+          <div class="filter-bar" role="group" aria-label="Filtrar órdenes"><button class="filter-chip filter-selected" data-filter="activas" type="button">Activas <span id="active-count">0</span></button><button class="filter-chip" data-filter="recibido" type="button">Recibido</button><button class="filter-chip" data-filter="en_preparacion" type="button">En preparación</button><button class="filter-chip" data-filter="listo" type="button">Listo</button><button class="filter-chip" data-filter="entregado" type="button">Entregado</button></div>
+          <div id="orders-feedback" class="staff-feedback" role="status"><span class="staff-spinner"></span><div><strong>Conectando con las órdenes</strong><p>Un momento, por favor.</p></div></div>
+          <div id="staff-orders" class="staff-orders"></div>
+        </section>
+        <section id="menu-workspace" class="staff-workspace" aria-label="Administración de platillos" hidden>
+          <div class="section-heading menu-admin-heading"><div><p class="eyebrow">MENÚ DEL RESTAURANTE</p><h2>Administrar platillos</h2><p class="staff-welcome">Añade productos y mantén al día sus precios y disponibilidad.</p></div><button id="add-menu-item" class="staff-primary menu-add-button" type="button">＋ Agregar platillo</button></div>
+          <div class="menu-admin-tools"><label class="menu-search-label" for="menu-search">Buscar platillo</label><input id="menu-search" type="search" placeholder="Nombre o categoría"><label class="menu-filter-label" for="menu-availability-filter">Mostrar</label><select id="menu-availability-filter"><option value="all">Todos</option><option value="available">Disponibles</option><option value="unavailable">Ocultos</option></select></div>
+          <div id="menu-feedback" class="staff-feedback" role="status" hidden></div>
+          <div id="staff-menu-items" class="staff-menu-items"></div>
+        </section>
+        <section id="tables-workspace" class="staff-workspace" aria-label="Mesas activas" hidden>
+          <div class="section-heading"><div><p class="eyebrow">SEGUIMIENTO DE VISITAS</p><h2>Mesas activas</h2></div></div>
+          <div id="tables-feedback" class="staff-feedback" role="status"></div>
+          <div id="active-tables" class="active-tables"></div>
+          <div class="closed-visits-heading"><p class="eyebrow">HISTORIAL</p><h2>Visitas cerradas recientes</h2></div>
+          <div id="closed-visits" class="closed-visits"></div>
+          <details class="table-setup-details">
+            <summary>Agregar una mesa nueva</summary>
+            <section class="table-setup-card" aria-labelledby="table-setup-title">
+              <div><p class="eyebrow">CONFIGURACIÓN</p><h3 id="table-setup-title">Crear mesa y generar QR</h3><p>El enlace se crea automáticamente con la dirección desde la que abriste el panel.</p></div>
+              <form id="table-setup-form" class="table-setup-form"><label for="new-table-number">Número de mesa</label><input id="new-table-number" type="number" min="1" max="999" step="1" required placeholder="Ej. 4"><small>Para usar el QR desde otros dispositivos, abre el panel desde una dirección accesible en esa red o desde el dominio publicado.</small><button id="create-table-button" class="staff-primary" type="submit">Crear mesa y QR <span aria-hidden="true">→</span></button></form>
+              <p id="table-setup-feedback" class="transition-feedback" role="status" aria-live="polite"></p>
+              <div id="table-qr-result" class="table-qr-result" hidden><canvas id="table-qr-canvas" width="280" height="280" aria-label="Código QR de la mesa"></canvas><div><strong id="table-qr-title"></strong><p>Guarda el QR para imprimirlo o compartirlo con los clientes.</p><input id="table-qr-url" readonly aria-label="Enlace del menú de la mesa"><button id="copy-table-qr-url" class="staff-detail-button" type="button">Copiar enlace</button><button id="download-created-table-qr" class="staff-detail-button" type="button">Descargar QR PNG</button><button id="print-created-table-qr" class="staff-detail-button" type="button">Imprimir / guardar como PDF</button><a id="open-table-menu" class="staff-detail-button table-open-link" target="_blank" rel="noopener noreferrer">Abrir menú de esta mesa</a></div></div>
+            </section>
+          </details>
+        </section>
+        <section id="requests-workspace" class="staff-workspace" aria-label="Solicitudes" hidden><div class="section-heading"><div><p class="eyebrow">ATENCIÓN DE MESAS</p><h2>Solicitudes</h2></div></div><div id="requests-feedback" class="staff-feedback" role="status"></div><div id="staff-requests" class="staff-requests"></div></section>
+      </section>
+    </main>
+    <dialog id="payment-dialog" class="staff-order-dialog" aria-labelledby="payment-title"><form method="dialog" class="staff-dialog-top"><button class="staff-close" aria-label="Cerrar pago">×</button></form><div class="staff-detail-body"><p class="eyebrow">CIERRE DE CUENTA</p><h2 id="payment-title">Registrar pago</h2><p id="payment-summary" class="payment-summary"></p><label class="field-label" for="payment-method">Método físico</label><select id="payment-method" class="payment-method"><option value="cash">Efectivo</option><option value="other_physical">Otro método físico</option></select><p id="payment-feedback" class="transition-feedback" role="status"></p><button id="record-payment" class="staff-primary" type="button">Registrar pago completo y cerrar visita</button></div></dialog>
+    <dialog id="table-qr-dialog" class="staff-order-dialog table-qr-dialog" aria-labelledby="managed-table-qr-title"><form method="dialog" class="staff-dialog-top"><button class="staff-close" aria-label="Cerrar código QR">×</button></form><div class="staff-detail-body table-qr-dialog-body"><p class="eyebrow">CÓDIGO DE MESA</p><h2 id="managed-table-qr-title">Código QR</h2><canvas id="managed-table-qr-canvas" width="280" height="280" aria-label="Código QR de la mesa"></canvas><input id="managed-table-qr-url" readonly aria-label="Enlace del menú de la mesa"><div class="table-qr-actions"><button id="managed-table-qr-copy" class="staff-detail-button" type="button">Copiar enlace</button><button id="managed-table-qr-download" class="staff-primary" type="button">Descargar imagen PNG</button><button id="managed-table-qr-print" class="staff-detail-button" type="button">Imprimir / guardar como PDF</button></div></div></dialog>
+    <dialog id="menu-item-dialog" class="staff-order-dialog" aria-labelledby="menu-item-title"><form method="dialog" class="staff-dialog-top"><button class="staff-close" aria-label="Cerrar formulario">×</button></form><div class="staff-detail-body"><p class="eyebrow">MENÚ DEL RESTAURANTE</p><h2 id="menu-item-title">Agregar platillo</h2><form id="menu-item-form" class="menu-item-form"><label class="field-label" for="menu-name">Nombre</label><input id="menu-name" name="name" maxlength="100" required><label class="field-label" for="menu-description">Descripción</label><textarea id="menu-description" name="description" maxlength="500" rows="3"></textarea><label class="field-label" for="menu-category">Categoría</label><select id="menu-category" name="category" required><option value="" disabled selected>Selecciona una categoría</option><option>Entradas</option><option>Platos fuertes</option><option>Postres</option><option>Bebidas</option><option>Alcohol</option><option>Niños</option></select><label class="field-label" for="menu-price">Precio (C$)</label><input id="menu-price" name="price" type="number" min="0.01" max="100000" step="0.01" inputmode="decimal" required><label class="field-label" for="menu-options">Opciones de personalización</label><input id="menu-options" name="options" maxlength="300" placeholder="Ej.: Suave, Picante"><label class="field-label" for="menu-image">URL de imagen (opcional)</label><input id="menu-image" name="imageUrl" type="url" maxlength="1000" placeholder="https://…"><label class="menu-availability"><input id="menu-available" type="checkbox" checked> Disponible para clientes</label><p id="menu-item-feedback" class="transition-feedback" role="status"></p><button id="save-menu-item" class="staff-primary" type="submit">Guardar platillo</button></form></div></dialog>
+    <dialog id="staff-order-dialog" class="staff-order-dialog" aria-labelledby="detail-order-number"><form method="dialog" class="staff-dialog-top"><button class="staff-close" aria-label="Cerrar detalles">×</button></form><div id="order-detail-content"></div></dialog>
+    <script type="module" src="./js/staff.js"></script>
+  </body>
+</html>
