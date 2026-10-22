@@ -506,7 +506,7 @@ async function drawTableQr(canvas, link) {
 }
 
 function tableMenuUrl(tableId, token) {
-  const url = new URL('./index.html', window.location.href);
+  const url = new URL('./menu.html', window.location.href);
   url.search = '';
   url.searchParams.set('mesa', tableId);
   url.searchParams.set('token', token);

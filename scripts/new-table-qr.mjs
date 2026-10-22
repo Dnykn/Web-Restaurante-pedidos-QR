@@ -10,7 +10,7 @@ if (!/^\d{1,3}$/.test(table)) {
   const tableId = table.padStart(2, '0');
   const token = randomBytes(32).toString('base64url');
   const qrTokenHash = createHash('sha256').update(token, 'utf8').digest('hex');
-  const url = new URL('/index.html', origin);
+  const url = new URL('/menu.html', origin);
   url.searchParams.set('mesa', tableId);
   url.searchParams.set('token', token);
   console.log(`tableId: ${tableId}`);

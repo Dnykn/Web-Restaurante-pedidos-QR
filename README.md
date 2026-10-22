@@ -1,67 +1,77 @@
 # MesaExpress
 
-Aplicación web de pedidos digitales por mesa. El cliente y el panel del personal usan HTML, CSS y JavaScript modular. Firestore comparte el menú y los pedidos en tiempo real.
+Aplicación web para pedidos por QR, seguimiento de cocina y administración de mesas. El menú del cliente y el panel del personal escriben y leen directamente en Cloud Firestore; el proyecto no requiere Cloud Functions.
 
-## Implementado
+## Funciones principales
 
-- Menú en tiempo real desde `platillos`, filtrado por categoría.
-- Personalizaciones, notas de hasta 500 caracteres y cantidades de 1 a 20.
-- Carrito editable. Al confirmar, el menú abre automáticamente la cuenta de la mesa si hace falta, calcula el total y crea el pedido directamente en `orders`; el panel lo recibe en tiempo real.
-- Seguimiento flotante y separado para cada pedido, desde que cocina lo recibe hasta que el mesero confirma la entrega.
-- Inicio de sesión de personal con correo y contraseña, verificación de autorización y tablero de cocina actualizado en vivo.
-- Transiciones secuenciales `recibido → en_preparacion → listo → entregado`, reflejadas en tiempo real para el cliente y el personal.
-- Solicitudes de ayuda/cuenta desde el menú, guardadas directamente en Firestore; se puede pedir la cuenta después de entregar las órdenes.
-- Panel de mesas abiertas en tiempo real con pedidos, acumulado, saldo y recordatorio persistente tras 30 minutos desde la entrega más reciente.
-- La mesa se activa automáticamente con su primer pedido; el personal puede revisar sus pedidos y registrar el pago cuando quiera. El cobro bloquea el cierre si hay órdenes sin entregar.
-- Notificaciones visuales y sonidos diferenciados para pedidos y solicitudes. El sonido está activado por defecto, el navegador lo desbloquea con la primera interacción y el personal puede apagarlo o volverlo a encender desde el control visible del encabezado.
-- Pestaña de administración de platillos con búsqueda, filtro por disponibilidad, alta, edición y eliminación directas en Firestore, protegidas por reglas para personal autorizado.
-- Al enviar el primer pedido de una mesa, el menú crea automáticamente su registro de cuenta y guarda el pedido en Firestore. El personal no necesita abrir la mesa antes; puede revisar pedidos y cerrar la cuenta cuando corresponda.
-- Solicitudes, pagos, estados de cocina y recordatorios se gestionan directamente desde el navegador con reglas de Firestore. El recordatorio de 30 minutos se calcula desde la entrega más reciente.
+### Menú del cliente
 
-La configuración web Firebase en `js/firebase.js` conserva los valores proporcionados por el propietario.
+- Carga en tiempo real los platillos disponibles desde `platillos` y permite filtrarlos por categoría.
+- Permite elegir personalizaciones, agregar instrucciones, cambiar cantidades y editar el carrito.
+- Al confirmar, asocia el pedido con el QR y la mesa, crea o reutiliza la visita abierta y guarda el pedido en Firestore.
+- Muestra el carrito, el total de la cuenta y el seguimiento de cada pedido en un panel flotante. Los pedidos se muestran por separado y avanzan por los estados de cocina y entrega.
+- Permite solicitar ayuda. La solicitud aparece en el panel del personal y puede cancelarse mientras siga pendiente.
+- Solo permite solicitar la cuenta si hay pedidos pendientes de pago y todos están entregados.
+- Mantiene los pedidos y la cuenta separados por mesa.
 
-## Documentos Firestore
+### Panel del personal (`staff.html`)
 
-Los IDs de mesa usan al menos dos dígitos (`04`). El personal prepara las mesas y sus QR desde la sección **Mesas activas**. La cuenta se abre con el primer pedido.
+- Inicia sesión con correo y contraseña de Firebase Authentication y valida el perfil `staffUsers/{uid}`.
+- Recibe pedidos y solicitudes en tiempo real.
+- Muestra en cada tarjeta la acción inmediata del pedido: **Iniciar preparación**, **Marcar como listo** o **Confirmar entrega**. Se puede consultar el detalle completo cuando haga falta.
+- Incluye filtros por estado y avisos visuales y de sonido. El sonido se activa con la primera interacción del navegador y se puede controlar desde el encabezado.
+- Tiene una pestaña **Platillos** para buscar, filtrar por disponibilidad, agregar, editar, ocultar y eliminar elementos de `platillos`.
+- En **Mesas activas**, muestra pedidos, acumulado, saldo pendiente y última entrega; permite registrar pagos, cerrar cuentas, revisar visitas cerradas y atender recordatorios después de 30 minutos.
+- Permite crear mesas, generar y copiar sus enlaces QR, descargar el código como PNG, imprimirlo o guardarlo como PDF, y eliminar mesas sin visita activa.
 
-- `platillos/{productId}`: `name`, `description`, `category` (`Entradas`, `Platos fuertes`, `Postres`, `Bebidas`, `Alcohol` o `Niños`), `priceCents`, `imageUrl` HTTPS opcional, `available` booleano y `customizationOptions` opcional. Ejemplo: `[{"name":"Término","options":["Medio","Bien cocido"],"required":true}]`.
-- `tables/04`: `enabled: true`, `activeVisitId: "visita-actual"`, `qrTokenHash: "<SHA-256 hexadecimal del token QR>"`.
-- `tableAccess/{token}`: acceso por QR, con `tableId`, `activeVisitId`, `enabled` y `updatedAt`. El menú crea o reutiliza una cuenta abierta al enviar un pedido.
-- `visits/{visitId}`: `tableId: "04"`, `status: "open"`, `customerUids: []`, `subtotalCents: 0`, `serviceChargeCents: 0`, `totalCents: 0`, `amountPaidCents: 0`, `balanceDueCents: 0`, `paymentStatus: "unpaid"`.
-- `orders/{orderId}`: mesa, cliente, productos y totales; inicia con `status: "recibido"`. Cada transición de cocina/servicio se refleja en el seguimiento flotante del cliente.
-- `payments/{paymentId}`: pago físico completo con `visitId`, `tableId`, `amountCents`, `method`, `createdAt` y cuenta staff que lo registró.
-- `settings/restaurant`: documento público con `serviceChargeBps: 0`. 1000 puntos básicos equivalen a 10 %.
-- `staffUsers/{uid}`: `role: "staff"`, `enabled: true`, `displayName: "Personal"`. El administrador del proyecto crea este documento después de crear la cuenta compartida en Authentication y copiar su UID. Las reglas no permiten modificarlo desde el navegador.
-- `assistanceRequests/{requestId}`: tipo, estado, mesa y clientes asociados a la cuenta.
+## Flujo de pedido y pago
 
-Desde **Mesas activas**, agrega la mesa y el panel genera su enlace y QR a partir de la dirección actual. La tabla guarda el token QR y su hash; solo el personal autenticado puede leer `tables`. Desde otro dispositivo, abre el panel usando una dirección accesible por ese dispositivo; `127.0.0.1` solo apunta al equipo donde se abre.
+1. El cliente abre `menu.html` mediante el QR de su mesa y confirma uno o más pedidos.
+2. El personal recibe cada pedido en **Órdenes** y cambia su estado directamente desde la tarjeta.
+3. El seguimiento del cliente refleja cada cambio en tiempo real.
+4. El cliente puede pedir la cuenta cuando tenga pedidos pendientes de pago y todos estén entregados.
+5. El personal registra el pago completo. El sistema bloquea el cierre mientras haya pedidos sin entregar; al pagar, cierra la visita y libera la mesa.
 
-## Configuración y despliegue
+## Firebase y datos
 
-1. En Firebase Console habilita Authentication **Anónimo** para clientes y **Correo electrónico/contraseña** para la cuenta compartida del personal.
-2. Crea la cuenta de personal y agrega `staffUsers/{uid}` con `role: "staff"`, `enabled: true` y `displayName`.
-3. Crea Cloud Firestore y configura sus reglas e índices.
-4. Publica las reglas e índices de Firestore desde Firebase Console.
-5. Sirve el sitio por HTTPS o en un servidor local. Los módulos CDN no funcionan con `file://`.
+La configuración de la aplicación web está en `js/firebase.js`. Se usa Firebase Authentication y Cloud Firestore mediante módulos ES importados desde Firebase CDN.
 
-El QR usa automáticamente el origen desde el que se abrió `staff.html`; para teléfonos, ese origen debe ser una dirección de red o dominio que ellos puedan abrir.
+| Colección / documento | Uso |
+| --- | --- |
+| `platillos/{id}` | Nombre, descripción, categoría, precio en centavos, imagen opcional, personalizaciones y disponibilidad. |
+| `tables/{id}` | Número de mesa, estado, visita activa y datos del QR. |
+| `tableAccess/{token}` | Acceso QR de la mesa y referencia a su visita activa. |
+| `visits/{id}` | Cuenta de una visita: mesa, clientes, totales, saldo y estado abierto o cerrado. |
+| `orders/{id}` | Productos, totales, mesa, visita, cliente y estado del pedido. |
+| `assistanceRequests/{id}` | Solicitudes de ayuda o cuenta, estado, mesa y visita asociada cuando corresponde. |
+| `payments/{id}` | Pago registrado, monto, método, visita y usuario de staff que lo registró. |
+| `settings/restaurant` | Configuración pública del restaurante, como `serviceChargeBps`. |
+| `staffUsers/{uid}` | Perfil de autorización del personal. |
 
-## Próximas fases y límites
+Las categorías disponibles para platillos son `Entradas`, `Platos fuertes`, `Postres`, `Bebidas`, `Alcohol` y `Niños`. Los precios se guardan como enteros en centavos de córdoba (`priceCents`).
 
-- Recuperación de conexión más amplia y matriz de pruebas.
-- La cuenta compartida identifica la cuenta autenticada, pero no al empleado que realizó cada acción.
-- La interfaz de personal no muestra órdenes ficticias: requiere la cuenta autorizada y pedidos reales.
+El perfil de personal debe usar tipos correctos de Firestore: `role` como string con valor `staff`, `enabled` como booleano `true` y `displayName` como string. El documento se guarda en `staffUsers/{uid}`, usando como ID el UID de la cuenta de Authentication.
 
-## Estructura principal
+## Configuración local
 
-`index.html`, `staff.html`, `css/styles.css`, `js/app.js`, `js/staff.js`, `js/firebase.js`, `firestore.rules`, `firestore.indexes.json`, `firebase.json`, `scripts/new-table-qr.mjs`.
+1. En Firebase Authentication habilita inicio anónimo para clientes y correo/contraseña para staff.
+2. Crea la cuenta de staff y su documento `staffUsers/{uid}`.
+3. Crea la base de datos Cloud Firestore y publica las reglas e índices del proyecto (`firestore.rules` y `firestore.indexes.json`) desde Firebase Console o Firebase CLI.
+4. Sirve el proyecto con un servidor local, por ejemplo Live Server. La raíz (`index.html`) abre el panel de staff. No abras `index.html`, `staff.html` o `menu.html` directamente con `file://`, porque los módulos JavaScript necesitan un origen web.
+5. Para imprimir o escanear un QR desde otro dispositivo, abre el panel desde una dirección accesible para ese dispositivo, como una IP local de la computadora o el dominio publicado. `127.0.0.1` solo funciona en la misma computadora.
 
-## Menú de prueba
+Las reglas locales del repositorio no se publican automáticamente al editar el archivo. La seguridad efectiva de Firestore depende de las reglas que estén publicadas en Firebase Console.
 
-Los datos iniciales de la especificación son:
+## Archivos principales
 
-- Tacos de res ahumada — categoría **Platos fuertes** — C$210.
-- Pasta cremosa — categoría **Platos fuertes** — C$260.
-- Bruschettas — categoría **Entradas** — C$145.
-
-La pestaña **Platillos** del panel administra directamente los documentos de `platillos`. Personal autenticado puede agregar, editar, ocultar o eliminar platillos; las reglas de Firestore comprueban que la cuenta esté en `staffUsers/{uid}` con `role: "staff"` y `enabled: true`.
+- `index.html`: entrada principal; abre `staff.html` y enruta los QR antiguos al menú.
+- `menu.html`: menú y experiencia del cliente.
+- `staff.html`: panel de cocina, servicio, mesas y platillos.
+- `js/app.js`: carrito, pedidos, seguimiento y solicitudes del cliente.
+- `js/staff.js`: autenticación, pedidos, platillos, mesas y pagos del personal.
+- `js/firebase.js`: inicialización de Firebase.
+- `css/styles.css`: estilos del menú y del panel.
+- `firestore.rules`: reglas locales de Cloud Firestore.
+- `firestore.indexes.json`: índices compuestos requeridos por las consultas.
+- `firebase.json`: configuración local para publicar reglas e índices.
+- `scripts/new-table-qr.mjs`: utilidad auxiliar relacionada con códigos QR.
