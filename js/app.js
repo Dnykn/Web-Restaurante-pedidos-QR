@@ -19,6 +19,8 @@ let cartRequestId = null;
 let visitId = null;
 let serviceChargeBps = 0;
 let stopOrders = null;
+let stopTableAccess = null;
+let trackedVisitId = null;
 let stopCustomerRequest = null;
 let orderTrackingExpanded = false;
 let trackedOrders = [];
@@ -356,7 +358,7 @@ async function confirmOrder() {
       status: 'recibido', items: lines, subtotalCents, serviceChargeCents, totalCents,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp(), receivedAt: serverTimestamp(),
     });
-    startOrderTracking(customer.uid);
+    startOrderTracking(visitId);
     cart = []; cartRequestId = null; saveCart();
     $('#order-feedback').textContent = `Pedido ${orderNumber} recibido. Gracias.`;
     renderCart();
@@ -389,11 +391,12 @@ async function confirmOrder() {
   }
 }
 
-function startOrderTracking(customerUid = services?.auth?.currentUser?.uid) {
-  if (!customerUid) return;
+function startOrderTracking(currentVisitId) {
+  if (!currentVisitId || trackedVisitId === currentVisitId) return;
   if (stopOrders) stopOrders();
+  trackedVisitId = currentVisitId;
   const { collection, onSnapshot, query, where } = services.firestore;
-  const ordersQuery = query(collection(services.db, 'orders'), where('customerUids', 'array-contains', customerUid));
+  const ordersQuery = query(collection(services.db, 'orders'), where('visitId', '==', currentVisitId));
   stopOrders = onSnapshot(ordersQuery, (snapshot) => {
     const list = $('#order-tracking-list'); list.replaceChildren();
     const recentFirst = [...snapshot.docs].sort((a, b) => {
@@ -401,8 +404,6 @@ function startOrderTracking(customerUid = services?.auth?.currentUser?.uid) {
       const bTime = b.data().createdAt?.toMillis?.() ?? 0;
       return bTime - aTime;
     });
-    // Anonymous Auth persists in this browser, so the same UID may have used
-    // more than one table QR. Never show another table's orders in this menu.
     const currentTableId = tableId.padStart(2, '0');
     const accountOrderDocs = recentFirst.filter((orderDoc) => {
       const order = { id: orderDoc.id, ...orderDoc.data() };
@@ -449,6 +450,35 @@ function startOrderTracking(customerUid = services?.auth?.currentUser?.uid) {
       ? 'No tienes permiso para consultar estos pedidos. Revisa las reglas de Firestore.'
       : 'No se pudo conectar con el seguimiento. Comprueba tu conexión y vuelve a cargar el menú.';
     list.append(message);
+  });
+}
+
+function watchTableAccount() {
+  if (!services || !qrToken || !/^\d{1,3}$/.test(tableId)) return;
+  if (stopTableAccess) stopTableAccess();
+  const { doc, onSnapshot } = services.firestore;
+  stopTableAccess = onSnapshot(doc(services.db, 'tableAccess', qrToken), (snapshot) => {
+    const access = snapshot.exists() ? snapshot.data() : null;
+    const nextVisitId = access?.enabled === true && access.tableId === tableId.padStart(2, '0')
+      && typeof access.activeVisitId === 'string' ? access.activeVisitId : null;
+    if (nextVisitId === trackedVisitId) {
+      if (visitId !== nextVisitId) { visitId = nextVisitId; saveCart(); }
+      return;
+    }
+    visitId = nextVisitId;
+    trackedOrders = [];
+    orderTrackingError = false;
+    if (!nextVisitId && stopOrders) {
+      stopOrders();
+      stopOrders = null;
+      trackedVisitId = null;
+    } else if (nextVisitId) {
+      startOrderTracking(nextVisitId);
+    }
+    saveCart();
+    syncOrderPanel();
+  }, (error) => {
+    console.error('No se pudo seguir la visita de esta mesa.', error);
   });
 }
 
@@ -612,7 +642,7 @@ function startApp() {
       services = { ...firebase, firestore: api }; connectMenu(); listenToServiceCharge(); renderCart();
       waitForCustomerAuth().then(async (user) => {
         if (!user) return;
-        startOrderTracking(user.uid);
+        watchTableAccount();
         if (customerRequestId) subscribeCustomerRequest();
       }).catch((error) => console.error('No se pudo recuperar la sesión de cliente.', error));
     });

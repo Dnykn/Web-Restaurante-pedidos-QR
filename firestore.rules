@@ -24,6 +24,17 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/tables/$(visit.tableId)).data.activeVisitId == visitId);
     }
 
+    function canReadOpenQrVisitOrders(visitId) {
+      let visitPath = /databases/$(database)/documents/visits/$(visitId);
+      return isAnonymousCustomer()
+        && exists(visitPath)
+        && get(visitPath).data.status == 'open'
+        && get(visitPath).data.qrAccessToken is string
+        && exists(/databases/$(database)/documents/tableAccess/$(get(visitPath).data.qrAccessToken))
+        && get(/databases/$(database)/documents/tableAccess/$(get(visitPath).data.qrAccessToken)).data.enabled == true
+        && get(/databases/$(database)/documents/tableAccess/$(get(visitPath).data.qrAccessToken)).data.activeVisitId == visitId;
+    }
+
     match /staffUsers/{userId} {
       allow get: if signedIn() && request.auth.uid == userId;
       allow list, create, update, delete: if false;
@@ -181,8 +192,12 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow get: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids);
-      allow list: if isStaff() || (signedIn() && request.auth.uid in resource.data.customerUids);
+      allow get: if isStaff()
+        || (signedIn() && request.auth.uid in resource.data.customerUids)
+        || canReadOpenQrVisitOrders(resource.data.visitId);
+      allow list: if isStaff()
+        || (signedIn() && request.auth.uid in resource.data.customerUids)
+        || canReadOpenQrVisitOrders(resource.data.visitId);
       // The same browser origin shares Firebase Auth between staff and menu tabs.
       // A staff session may therefore place a QR order too, but it must still
       // match an enabled QR, its open visit, and the visit's table/customer UID.
