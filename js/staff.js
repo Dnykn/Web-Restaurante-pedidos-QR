@@ -137,6 +137,11 @@ function isVisible(order) {
   return false;
 }
 
+function canChangeOrderItemStatus(nextStatus, source) {
+  if (nextStatus === 'entregado') return staffUser?.role === 'mesero' && source === 'delivery';
+  return staffUser?.role === 'cocina' && ['en_preparacion', 'listo'].includes(nextStatus) && ['kitchen', 'detail'].includes(source);
+}
+
 function aggregateOrderStatus(items, fallback = 'recibido') {
   if (!items.length) return fallback;
   const statuses = items.map((item) => item.status ?? fallback);
@@ -1304,7 +1309,7 @@ function createOrderCard(order) {
     if (customization) { const detail = document.createElement('small'); detail.className = 'staff-kitchen-line-detail'; detail.textContent = customization; copy.append(detail); }
     line.append(copy);
     const next = { recibido: ['en_preparacion', 'Iniciar preparación'], en_preparacion: ['listo', 'Marcar listo'] }[item.status];
-    if (next) {
+    if (next && canChangeOrderItemStatus(next[0], 'kitchen')) {
       const advance = document.createElement('button'); advance.type = 'button'; advance.className = 'staff-line-advance';
       const key = `${order.id}:${item.index}`; advance.disabled = inFlightOrderId === key;
       advance.textContent = advance.disabled ? 'Actualizando…' : next[1];
@@ -1359,11 +1364,17 @@ function renderDeliveries() {
       copy.append(name, station);
       const details = [...Object.values(item.customizations ?? {}), item.note].filter(Boolean).join(' · ');
       if (details) { const note = document.createElement('small'); note.className = 'staff-kitchen-line-detail'; note.textContent = details; copy.append(note); }
-      const delivered = document.createElement('button'); delivered.type = 'button'; delivered.className = 'staff-primary delivery-confirm-button';
-      const key = `${order.id}:${index}`; delivered.disabled = inFlightOrderId === key;
-      delivered.textContent = delivered.disabled ? 'Actualizando…' : 'Marcar entregado';
-      delivered.addEventListener('click', () => changeOrderItemStatus(order.id, index, 'entregado', 'delivery'));
-      row.append(copy, delivered); readyItems.append(row);
+      row.append(copy);
+      if (canChangeOrderItemStatus('entregado', 'delivery')) {
+        const delivered = document.createElement('button'); delivered.type = 'button'; delivered.className = 'staff-primary delivery-confirm-button';
+        const key = `${order.id}:${index}`; delivered.disabled = inFlightOrderId === key;
+        delivered.textContent = delivered.disabled ? 'Actualizando…' : 'Marcar entregado';
+        delivered.addEventListener('click', () => changeOrderItemStatus(order.id, index, 'entregado', 'delivery'));
+        row.append(delivered);
+      } else {
+        const note = document.createElement('small'); note.className = 'detail-queue-note'; note.textContent = 'La entrega corresponde al Mesero.'; row.append(note);
+      }
+      readyItems.append(row);
     });
     card.append(readyItems);
     const open = document.createElement('button'); open.type = 'button'; open.className = 'staff-detail-button'; open.textContent = 'Ver pedido completo →'; open.addEventListener('click', () => openOrder(order.id)); card.append(open);
@@ -1402,10 +1413,12 @@ function renderOrderDetails() {
     if (options.length) { const custom = document.createElement('p'); custom.className = 'detail-customizations'; custom.textContent = options.map(([key, value]) => `${key}: ${value}`).join(' · '); row.append(custom); }
     if (item.note) { const note = document.createElement('p'); note.className = 'detail-note'; note.textContent = `Nota: ${item.note}`; row.append(note); }
     const next = itemMode !== 'direct' ? { recibido: ['en_preparacion', 'Iniciar preparación'], en_preparacion: ['listo', 'Marcar listo'] }[itemStatus] : null;
-    if (next) {
+    if (next && canChangeOrderItemStatus(next[0], 'detail')) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'staff-detail-button detail-line-action';
       const key = `${order.id}:${index}`; button.disabled = inFlightOrderId === key; button.textContent = button.disabled ? 'Actualizando…' : next[1];
       button.addEventListener('click', () => changeOrderItemStatus(order.id, index, next[0], 'detail')); row.append(button);
+    } else if (next) {
+      const note = document.createElement('small'); note.className = 'detail-queue-note'; note.textContent = 'Estado visible · los cambios de preparación corresponden a Cocina.'; row.append(note);
     } else if (itemMode === 'direct' && itemStatus === 'listo') {
       const queued = document.createElement('small'); queued.className = 'detail-queue-note'; queued.textContent = 'Disponible en la pestaña Entregas.'; row.append(queued);
     }
@@ -1429,6 +1442,12 @@ function renderOrderDetails() {
 }
 
 async function changeOrderItemStatus(orderId, itemIndex, nextStatus, source = 'kitchen') {
+  if (!canChangeOrderItemStatus(nextStatus, source)) {
+    const message = nextStatus === 'entregado' ? 'Solo Mesero puede confirmar la entrega.' : 'Solo Cocina puede cambiar el estado de preparación.';
+    if (source === 'detail') { const feedback = $('#transition-feedback'); if (feedback) feedback.textContent = message; }
+    else staffNotice(message, 'error');
+    return;
+  }
   const operationKey = `${orderId}:${itemIndex}`;
   inFlightOrderId = operationKey;
   renderOrders(); renderOrderDetails(); renderDeliveries();

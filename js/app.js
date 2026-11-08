@@ -6,6 +6,14 @@ const categoryList = $('#category-list');
 const menuFeedback = $('#menu-feedback');
 const productDialog = $('#product-dialog');
 const toast = $('#toast');
+const tutorialStorageKey = 'mesaexpress-menu-tutorial:v1';
+const tutorialSteps = [
+  { title: 'Bienvenido a MesaExpress', copy: 'Este menú está asociado a tu mesa. Explora las categorías para encontrar lo que te apetece; puedes recorrerlo a tu ritmo.' },
+  { title: 'Abre un platillo', copy: 'Toca la tarjeta o la foto de un producto para ver sus detalles, escribir instrucciones especiales y elegir la cantidad.' },
+  { title: 'Arma tu pedido', copy: 'Pulsa Agregar. El carrito aparecerá en una esquina; desde ahí puedes ajustar cantidades y confirmar cuando estés listo.' },
+  { title: 'Sigue tu pedido', copy: 'Después de confirmar, el panel flotante muestra cada pedido y su avance. En “Ayuda / cuenta” puedes avisar al personal o solicitar la cuenta.' },
+];
+let tutorialStepIndex = 0;
 const params = new URLSearchParams(location.search);
 const tableId = params.get('mesa')?.trim() ?? '';
 const qrToken = params.get('token')?.trim() ?? '';
@@ -45,6 +53,27 @@ function showToast(message) {
   toast.classList.add('toast-visible');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('toast-visible'), 2800);
+}
+
+function renderTutorialStep() {
+  const step = tutorialSteps[tutorialStepIndex];
+  $('#menu-tutorial-title').textContent = step.title;
+  $('#menu-tutorial-copy').textContent = step.copy;
+  $('#menu-tutorial-step-count').textContent = `${tutorialStepIndex + 1} DE ${tutorialSteps.length}`;
+  $('#menu-tutorial-progress').style.width = `${((tutorialStepIndex + 1) / tutorialSteps.length) * 100}%`;
+  $('#menu-tutorial-back').disabled = tutorialStepIndex === 0;
+  $('#menu-tutorial-next').textContent = tutorialStepIndex === tutorialSteps.length - 1 ? 'Terminar' : 'Siguiente';
+}
+
+function openMenuTutorial() {
+  tutorialStepIndex = 0;
+  renderTutorialStep();
+  if (!$('#menu-tutorial-dialog').open) $('#menu-tutorial-dialog').showModal();
+}
+
+function finishMenuTutorial() {
+  localStorage.setItem(tutorialStorageKey, 'completed');
+  $('#menu-tutorial-dialog').close();
 }
 
 function readCart() {
@@ -838,6 +867,7 @@ function connectMenu() {
 function startApp() {
   $('#table-label').textContent = /^\d{1,3}$/.test(tableId) ? `Mesa ${tableId.padStart(2, '0')}` : 'Explora el menú';
   readCart(); renderCart();
+  if (localStorage.getItem(tutorialStorageKey) !== 'completed') setTimeout(openMenuTutorial, 500);
   document.querySelectorAll('[data-menu-view]').forEach((button) => {
     button.addEventListener('click', () => {
       menuView = button.dataset.menuView === 'list' ? 'list' : 'grid';
@@ -853,6 +883,14 @@ function startApp() {
     $('#order-tracking-toggle').setAttribute('aria-expanded', String(orderTrackingExpanded));
   });
   $('#help-nav').addEventListener('click', () => { $('#request-feedback').textContent = ''; $('#request-actions').hidden = false; $('#cancel-request').hidden = true; $('#message-dialog').showModal(); if (customerRequestId && services) subscribeCustomerRequest(); });
+  $('#reopen-menu-tutorial').addEventListener('click', () => { $('#message-dialog').close(); openMenuTutorial(); });
+  $('#menu-tutorial-back').addEventListener('click', () => { if (tutorialStepIndex > 0) { tutorialStepIndex -= 1; renderTutorialStep(); } });
+  $('#menu-tutorial-next').addEventListener('click', () => {
+    if (tutorialStepIndex < tutorialSteps.length - 1) { tutorialStepIndex += 1; renderTutorialStep(); }
+    else finishMenuTutorial();
+  });
+  $('#menu-tutorial-skip').addEventListener('click', finishMenuTutorial);
+  $('#menu-tutorial-dialog').addEventListener('close', () => localStorage.setItem(tutorialStorageKey, 'completed'));
   $('#request-help').addEventListener('click', () => requestStaff('help'));
   $('#request-bill').addEventListener('click', () => requestStaff('bill'));
   $('#cancel-request').addEventListener('click', cancelCustomerRequest);
