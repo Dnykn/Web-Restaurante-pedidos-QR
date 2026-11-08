@@ -1,3 +1,5 @@
+import { downloadInvoicePdf, invoiceMarkup } from './invoice.js';
+
 const $ = (selector) => document.querySelector(selector);
 const productGrid = $('#product-grid');
 const categoryList = $('#category-list');
@@ -12,7 +14,10 @@ const money = new Intl.NumberFormat('es-NI', { style: 'currency', currency: 'NIO
 
 let services;
 let products = [];
+let menuRecommendations = {};
+let recommendationsStop = null;
 let activeCategory = 'Todos';
+let menuView = 'grid';
 let selectedProduct = null;
 let cart = [];
 let cartRequestId = null;
@@ -20,6 +25,11 @@ let visitId = null;
 let serviceChargeBps = 0;
 let stopOrders = null;
 let stopTableAccess = null;
+let stopInvoiceVisit = null;
+let invoiceWatchVisitId = null;
+let pendingInvoiceWatchVisitId = null;
+let shownInvoiceVisitId = null;
+let currentInvoice = null;
 let trackedVisitId = null;
 let stopCustomerRequest = null;
 let orderTrackingExpanded = false;
@@ -66,10 +76,141 @@ function isAccountOrder(order) {
   return !accountClosedThrough || createdAt > accountClosedThrough;
 }
 
+function customerOrderStatus(order) {
+  const items = order.items ?? [];
+  if (!items.length) return order.status ?? 'recibido';
+  const statuses = items.map((item) => customerItemStatus(item, order));
+  if (statuses.every((status) => status === 'entregado')) return 'entregado';
+  if (statuses.includes('entregado')) return 'parcial';
+  if (statuses.every((status) => status === 'listo' || status === 'entregado')) return 'listo';
+  if (statuses.includes('en_preparacion')) return 'en_preparacion';
+  return 'recibido';
+}
+
+function customerOrderDelivered(order) {
+  const items = order.items ?? [];
+  return items.length ? items.every((item) => customerItemStatus(item, order) === 'entregado') : order.status === 'entregado';
+}
+
+function defaultFulfillmentMode(product) {
+  return product.fulfillmentMode ?? (/^(Bebidas|Alcohol)$/i.test(String(product.category ?? product.categoryId ?? '')) ? 'direct' : 'kitchen');
+}
+
+function customerItemStatus(item, order) {
+  const product = products.find((entry) => entry.id === item.productId);
+  const mode = product?.fulfillmentMode ?? item.fulfillmentMode ?? defaultFulfillmentMode(product ?? item);
+  if (mode === 'direct' && (!item.status || item.status === 'recibido')) return 'listo';
+  if (item.status) return item.status;
+  return mode === 'direct' ? 'listo' : order.status ?? 'recibido';
+}
+
+function customerItemMode(item) {
+  const product = products.find((entry) => entry.id === item.productId);
+  return product?.fulfillmentMode ?? item.fulfillmentMode ?? defaultFulfillmentMode(product ?? item);
+}
+
 function centsFor(product) {
   if (Number.isSafeInteger(product.priceCents) && product.priceCents >= 0) return product.priceCents;
   const price = Number(product.price);
   return Number.isFinite(price) && price >= 0 ? Math.round(price * 100) : -1;
+}
+
+function todayKey() {
+  const parts = new Intl.DateTimeFormat('en', { timeZone: 'America/Managua', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function dailySpecialProduct() {
+  const special = menuRecommendations.dailySpecial;
+  if (special?.dateKey === todayKey() && special.productId) {
+    const selected = products.find((item) => item.id === special.productId && item.available === true);
+    if (selected) return selected;
+  }
+  const available = products.filter((item) => item.available === true && !/^(Bebidas|Alcohol)$/i.test(String(item.category ?? item.categoryId ?? '')));
+  if (!available.length) available.push(...products.filter((item) => item.available === true));
+  if (!available.length) return null;
+  const counts = new Map((menuRecommendations.salesByProduct ?? []).map((row) => [row.productId, Number(row.units) || 0]));
+  const sorted = available.slice().sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || String(a.name).localeCompare(String(b.name), 'es'));
+  const lowestCount = counts.get(sorted[0].id) ?? 0;
+  const lowest = sorted.filter((item) => (counts.get(item.id) ?? 0) === lowestCount);
+  const dailyOffset = [...todayKey()].reduce((sum, character) => sum + character.charCodeAt(0), 0) % lowest.length;
+  return lowest[dailyOffset];
+}
+
+function effectivePriceCents(product) {
+  const base = centsFor(product);
+  const special = menuRecommendations.dailySpecial;
+  return special?.dateKey === todayKey() && special.productId === product.id && Number(special.discountPercent) > 0
+    ? Math.round(base * (100 - Math.min(50, Number(special.discountPercent))) / 100)
+    : base;
+}
+
+function renderRecommendations() {
+  const specialCard = $('#daily-special');
+  const special = dailySpecialProduct();
+  specialCard.hidden = !special;
+  if (special) {
+    const chosen = menuRecommendations.dailySpecial?.dateKey === todayKey() && menuRecommendations.dailySpecial.productId === special.id;
+    const discount = chosen ? Math.min(50, Number(menuRecommendations.dailySpecial.discountPercent) || 0) : 0;
+    $('#daily-special-name').textContent = special.name;
+    $('#daily-special-description').textContent = special.description || 'La recomendación de la casa para hoy.';
+    $('#daily-special-copy').textContent = discount ? `${discount}% de descuento hoy` : 'Elegido para ti';
+    $('#daily-special-add').textContent = discount ? `Agregar · ${formatCents(effectivePriceCents(special))}` : 'Ver platillo';
+    $('#daily-special-add').onclick = () => openProduct(special);
+    const visual = $('#daily-special-icon');
+    const imageUrl = typeof special.imageUrl === 'string' && /^https:\/\//i.test(special.imageUrl) ? special.imageUrl : '';
+    visual.replaceChildren();
+    if (imageUrl) { const image = document.createElement('img'); image.src = imageUrl; image.alt = ''; image.loading = 'lazy'; visual.append(image); }
+    else visual.textContent = '✳';
+  }
+  const comboSection = $('#combo-section');
+  const comboList = $('#combo-list');
+  comboList.replaceChildren();
+  const combos = (menuRecommendations.combos ?? []).filter((combo) => Number(combo.orderCount) >= 1 && Array.isArray(combo.items) && combo.items.length >= 2 && combo.items.every((line) => products.some((product) => product.id === line.productId && product.available === true)));
+  comboSection.hidden = !combos.length;
+  combos.slice(0, 4).forEach((combo) => {
+    const card = document.createElement('article'); card.className = 'combo-card';
+    const media = document.createElement('div'); media.className = 'combo-card-media';
+    const badge = document.createElement('span'); badge.className = 'combo-card-badge'; badge.textContent = 'COMBO SUGERIDO'; media.append(badge);
+    const collage = document.createElement('div'); collage.className = 'combo-collage';
+    combo.items.slice(0, 3).forEach((line) => {
+      const product = products.find((item) => item.id === line.productId);
+      const tile = document.createElement('span'); tile.className = 'combo-collage-tile';
+      const imageUrl = typeof product?.imageUrl === 'string' && /^https:\/\//i.test(product.imageUrl) ? product.imageUrl : '';
+      if (imageUrl) { const image = document.createElement('img'); image.src = imageUrl; image.alt = ''; image.loading = 'lazy'; tile.append(image); }
+      else { tile.classList.add('combo-collage-fallback'); tile.textContent = '✳'; }
+      collage.append(tile);
+    });
+    media.append(collage);
+    const content = document.createElement('div'); content.className = 'combo-card-content';
+    const name = document.createElement('h4'); name.textContent = combo.name || 'Combo de la casa';
+    const description = document.createElement('p'); description.className = 'combo-card-note';
+    description.textContent = Number(combo.orderCount) > 1 ? `Una combinación que ya eligieron ${combo.orderCount} mesas.` : 'Una combinación inspirada en pedidos reales.';
+    const ingredients = document.createElement('ul'); ingredients.className = 'combo-components';
+    combo.items.forEach((line) => {
+      const product = products.find((item) => item.id === line.productId);
+      const row = document.createElement('li');
+      const quantity = document.createElement('span'); quantity.className = 'combo-component-quantity'; quantity.textContent = `${line.quantity}×`;
+      const productName = document.createElement('strong'); productName.textContent = product?.name ?? 'Producto';
+      const price = document.createElement('span'); price.className = 'combo-component-price'; price.textContent = formatCents(effectivePriceCents(product) * line.quantity);
+      row.append(quantity, productName, price); ingredients.append(row);
+    });
+    const totalCents = combo.items.reduce((sum, line) => sum + effectivePriceCents(products.find((product) => product.id === line.productId)) * line.quantity, 0);
+    const totalRow = document.createElement('div'); totalRow.className = 'combo-total-row';
+    const totalLabel = document.createElement('span'); totalLabel.textContent = 'Total estimado';
+    const total = document.createElement('strong'); total.textContent = formatCents(totalCents); totalRow.append(totalLabel, total);
+    const add = document.createElement('button'); add.type = 'button'; add.className = 'combo-add-button'; add.innerHTML = `Agregar combo <span aria-hidden="true">→</span>`;
+    add.addEventListener('click', () => {
+      combo.items.forEach((line) => {
+        const product = products.find((item) => item.id === line.productId);
+        if (!product || product.available !== true) return;
+        cart.push({ key: crypto.randomUUID(), productId: product.id, name: product.name, unitPriceCents: effectivePriceCents(product), quantity: Math.min(20, Number(line.quantity) || 1), customizations: {}, note: '' });
+      });
+      cartRequestId = null; saveCart(); renderCart(); showToast('Combo agregado. Puedes quitar productos antes de confirmar.');
+    });
+    content.append(name, description, ingredients, totalRow, add); card.append(media, content); comboList.append(card);
+  });
 }
 
 function formatCents(cents) { return money.format(cents / 100); }
@@ -101,6 +242,8 @@ function renderMenu() {
   });
 
   const visible = activeCategory === 'Todos' ? products : products.filter((product) => String(product.category ?? product.categoryId ?? 'Otros') === activeCategory);
+  productGrid.classList.toggle('product-grid--list', menuView === 'list');
+  productGrid.classList.toggle('product-grid--compact', menuView === 'grid');
   $('#menu-count').textContent = `${visible.length} ${visible.length === 1 ? 'plato' : 'platos'}`;
   productGrid.replaceChildren();
   visible.forEach((product) => productGrid.append(createProductCard(product)));
@@ -114,9 +257,17 @@ function renderMenu() {
 
 function createProductCard(product) {
   const card = document.createElement('article');
-  card.className = 'product-card';
-  const visual = document.createElement('div');
+  const available = product.available === true;
+  const special = menuRecommendations.dailySpecial;
+  const isDailySpecial = special?.dateKey === todayKey() && special.productId === product.id;
+  card.className = `product-card${available ? '' : ' product-card-unavailable'}${isDailySpecial ? ' product-card-daily-special' : ''}`;
+  const visual = document.createElement('button');
+  visual.type = 'button';
   visual.className = 'product-visual';
+  visual.disabled = !available;
+  visual.setAttribute('aria-label', available ? `Ver opciones para agregar ${String(product.name ?? 'producto')}` : `${String(product.name ?? 'Producto')} no disponible`);
+  visual.title = available ? 'Ver opciones y agregar al pedido' : 'Platillo no disponible';
+  if (available) visual.addEventListener('click', () => openProduct(product));
   const imageUrl = typeof product.imageUrl === 'string' && /^https:\/\//i.test(product.imageUrl) ? product.imageUrl : '';
   if (imageUrl) {
     const img = document.createElement('img');
@@ -128,14 +279,23 @@ function createProductCard(product) {
     const mark = document.createElement('span'); mark.textContent = '✳'; mark.setAttribute('aria-hidden', 'true'); visual.append(mark);
   }
   const details = document.createElement('div'); details.className = 'product-info';
+  if (isDailySpecial) { const badge = document.createElement('span'); badge.className = 'daily-product-label'; badge.textContent = 'Platillo del día'; details.append(badge); }
   const category = document.createElement('p'); category.className = 'product-category'; category.textContent = String(product.category ?? product.categoryId ?? 'De la casa');
   const name = document.createElement('h3'); name.textContent = String(product.name ?? 'Producto');
   const description = document.createElement('p'); description.className = 'product-description'; description.textContent = String(product.description ?? '');
   const footer = document.createElement('div'); footer.className = 'product-footer';
-  const price = document.createElement('strong'); price.className = 'product-price'; price.textContent = formatCents(centsFor(product));
-  const add = document.createElement('button'); add.type = 'button'; add.className = 'add-button'; add.setAttribute('aria-label', `Agregar ${name.textContent} al pedido`); add.textContent = 'Agregar';
-  add.addEventListener('click', () => openProduct(product));
-  footer.append(price, add); details.append(category, name, description, footer); card.append(visual, details);
+  const price = document.createElement('strong'); price.className = 'product-price'; price.textContent = formatCents(effectivePriceCents(product));
+  if (isDailySpecial && Number(special.discountPercent) > 0) { const oldPrice = document.createElement('del'); oldPrice.className = 'daily-old-price'; oldPrice.textContent = formatCents(centsFor(product)); price.append(' ', oldPrice); }
+  if (available) {
+    const add = document.createElement('button'); add.type = 'button'; add.className = 'add-button'; add.setAttribute('aria-label', `Agregar ${name.textContent} al pedido`); add.textContent = 'Agregar';
+    add.addEventListener('click', () => openProduct(product));
+    footer.append(price, add);
+  } else {
+    const unavailable = document.createElement('span'); unavailable.className = 'unavailable-label';
+    unavailable.textContent = String(product.availabilityMessage || 'No disponible por falta de ingredientes');
+    footer.append(price, unavailable);
+  }
+  details.append(category, name, description, footer); card.append(visual, details);
   return card;
 }
 
@@ -149,7 +309,7 @@ function openProduct(product) {
   const body = document.createElement('div'); body.className = 'dialog-body';
   const eyebrow = document.createElement('p'); eyebrow.className = 'eyebrow'; eyebrow.textContent = String(product.category ?? product.categoryId ?? 'MENÚ');
   const title = document.createElement('h2'); title.id = 'product-title'; title.textContent = String(product.name ?? 'Producto');
-  const price = document.createElement('p'); price.className = 'detail-price'; price.textContent = formatCents(centsFor(product));
+  const price = document.createElement('p'); price.className = 'detail-price'; price.textContent = formatCents(effectivePriceCents(product));
   const description = document.createElement('p'); description.className = 'detail-description'; description.textContent = String(product.description ?? '');
   const fields = document.createElement('div'); fields.className = 'customization-fields';
   for (const [index, group] of optionGroups(product).entries()) {
@@ -171,7 +331,7 @@ function openProduct(product) {
   decrease.addEventListener('click', () => { const n = Math.max(1, Number(quantity.value) - 1); quantity.value = String(n); quantity.textContent = String(n); });
   increase.addEventListener('click', () => { const n = Math.min(20, Number(quantity.value) + 1); quantity.value = String(n); quantity.textContent = String(n); });
   quantityControl.append(decrease, quantity, increase); quantityRow.append(quantityControl);
-  const button = document.createElement('button'); button.type = 'button'; button.className = 'primary-button'; button.innerHTML = `Agregar · ${formatCents(centsFor(product))} <span aria-hidden="true">→</span>`;
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'primary-button'; button.innerHTML = `Agregar · ${formatCents(effectivePriceCents(product))} <span aria-hidden="true">→</span>`;
   button.addEventListener('click', () => {
     const selections = {};
     for (const select of fields.querySelectorAll('select')) {
@@ -179,7 +339,7 @@ function openProduct(product) {
       if (select.dataset.required === 'true' && !select.value) { select.focus(); showToast(`Elige: ${select.dataset.optionName}`); return; }
       if (select.value) selections[select.dataset.optionName] = select.value;
     }
-    const entry = { key: crypto.randomUUID(), productId: product.id, name: String(product.name ?? 'Producto'), unitPriceCents: centsFor(product), quantity: Number(quantity.value), customizations: selections, note: note.value.trim() };
+    const entry = { key: crypto.randomUUID(), productId: product.id, name: String(product.name ?? 'Producto'), unitPriceCents: effectivePriceCents(product), quantity: Number(quantity.value), customizations: selections, note: note.value.trim() };
     $('#order-feedback').textContent = '';
     cart.push(entry); cartRequestId = null; saveCart(); renderCart(); productDialog.close();
     showToast(`${entry.quantity} × ${entry.name} agregado${entry.quantity > 1 ? 's' : ''} al carrito`);
@@ -196,6 +356,10 @@ function totals() {
 
 function renderCart() {
   const lines = $('#cart-lines'); lines.replaceChildren();
+  cart.forEach((line) => {
+    const product = products.find((item) => item.id === line.productId);
+    if (product) line.unitPriceCents = effectivePriceCents(product);
+  });
   if (!cart.length) {
     const empty = document.createElement('p'); empty.className = 'empty-cart'; empty.textContent = 'Todavía no agregas platos. Vuelve al menú para elegir algo.'; lines.append(empty);
   }
@@ -243,9 +407,9 @@ function syncOrderPanel() {
   $('#order-account-total').textContent = accountOrders.length
     ? `Cuenta · ${formatCents(confirmedTotal)}`
     : `Carrito · ${formatCents(cartTotal)}`;
-  const activeOrders = accountOrders.filter((order) => order.status !== 'entregado');
+  const activeOrders = accountOrders.filter((order) => !customerOrderDelivered(order));
   const latest = [...accountOrders].sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0))[0];
-  const state = ({ recibido: 'Recibido por cocina', en_preparacion: 'En preparación', listo: 'Listo · espera al mesero', entregado: 'Entregado' })[latest?.status] ?? '';
+  const state = ({ recibido: 'Recibido', en_preparacion: 'En preparación', listo: 'Listo · espera al mesero', entregado: 'Entregado', parcial: 'Entrega parcial' })[customerOrderStatus(latest ?? {})] ?? '';
   const orderSummary = latest ? `Pedido ${latest.orderNumber ?? latest.id.slice(0, 6)} · ${state}${activeOrders.length > 1 ? ` · ${activeOrders.length} activos` : ''}` : '';
   const cartSummary = cartCount ? `${cartCount} producto(s) en el carrito` : '';
   $('#order-tracking-summary').textContent = [orderSummary, cartSummary].filter(Boolean).join(' · ') || 'Tu pedido';
@@ -284,6 +448,45 @@ async function getCustomer() {
   if (currentUser) return currentUser;
   const credential = await signInAnonymously(services.auth);
   return credential.user;
+}
+
+async function joinExistingVisit(customerUid, currentVisitId) {
+  if (!customerUid || !currentVisitId) return false;
+  const { arrayUnion, doc, runTransaction, serverTimestamp } = services.firestore;
+  const visitRef = doc(services.db, 'visits', currentVisitId);
+  return runTransaction(services.db, async (transaction) => {
+    const snapshot = await transaction.get(visitRef);
+    if (!snapshot.exists()) return false;
+    const visit = snapshot.data();
+    if (visit.status !== 'open' || visit.qrAccessToken !== qrToken || visit.tableId !== tableId.padStart(2, '0')) return false;
+    if (!(visit.customerUids ?? []).includes(customerUid)) {
+      transaction.update(visitRef, { customerUids: arrayUnion(customerUid), updatedAt: serverTimestamp() });
+    }
+    return true;
+  });
+}
+
+function watchInvoiceForVisit(currentVisitId, customerUid) {
+  if (!currentVisitId || !customerUid || currentVisitId === invoiceWatchVisitId || currentVisitId === pendingInvoiceWatchVisitId) return;
+  pendingInvoiceWatchVisitId = currentVisitId;
+  joinExistingVisit(customerUid, currentVisitId).then((joined) => {
+    if (!joined || pendingInvoiceWatchVisitId !== currentVisitId) return;
+    if (stopInvoiceVisit) stopInvoiceVisit();
+    invoiceWatchVisitId = currentVisitId;
+    const { doc, onSnapshot } = services.firestore;
+    stopInvoiceVisit = onSnapshot(doc(services.db, 'visits', currentVisitId), (snapshot) => {
+      if (!snapshot.exists()) return;
+      const visit = snapshot.data();
+      if (visit.status !== 'closed' || !visit.invoice || shownInvoiceVisitId === currentVisitId) return;
+      currentInvoice = { ...visit.invoice, visitId: currentVisitId };
+      shownInvoiceVisitId = currentVisitId;
+      if ($('#message-dialog').open) $('#message-dialog').close();
+      $('#customer-invoice-content').innerHTML = invoiceMarkup(currentInvoice);
+      $('#customer-invoice-dialog').showModal();
+    }, (error) => console.info('No se pudo seguir el comprobante de esta visita.', error));
+  }).catch((error) => console.info('No se pudo asociar este dispositivo a la visita.', error)).finally(() => {
+    if (pendingInvoiceWatchVisitId === currentVisitId) pendingInvoiceWatchVisitId = null;
+  });
 }
 
 async function joinCustomerVisit(customerUid = services?.auth?.currentUser?.uid) {
@@ -340,12 +543,13 @@ async function confirmOrder() {
     const lines = cart.map((line) => {
       const product = products.find((item) => item.id === line.productId);
       if (!product || product.available !== true) throw new Error(`El platillo “${line.name}” ya no está disponible.`);
-      const unitPriceCents = centsFor(product);
+      const unitPriceCents = effectivePriceCents(product);
       const quantity = Number(line.quantity);
       const lineTotalCents = unitPriceCents * quantity;
       if (!Number.isSafeInteger(lineTotalCents) || quantity < 1 || quantity > 20) throw new Error('Revisa el precio o la cantidad de los platillos.');
       return {
-        productId: line.productId, name: String(product.name ?? line.name), unitPriceCents,
+        productId: line.productId, name: String(product.name ?? line.name), category: String(product.category ?? product.categoryId ?? ''),
+        fulfillmentMode: defaultFulfillmentMode(product), status: defaultFulfillmentMode(product) === 'direct' ? 'listo' : 'recibido', unitPriceCents,
         quantity, customizations: line.customizations ?? {}, note: String(line.note ?? '').slice(0, 500), lineTotalCents,
       };
     });
@@ -414,21 +618,28 @@ function startOrderTracking(currentVisitId) {
     syncOrderPanel();
     accountOrderDocs.forEach((orderDoc) => {
       const data = orderDoc.data();
-      const card = document.createElement('article'); card.className = 'order-card';
+      const card = document.createElement('article'); card.className = `order-card order-card-state-${customerOrderStatus(data)}`;
       const header = document.createElement('div'); header.className = 'order-card-heading';
       const number = document.createElement('strong'); number.textContent = `Pedido ${data.orderNumber ?? orderDoc.id.slice(0, 6)}`;
-      const labels = ['Recibido por cocina', 'En preparación', 'Listo · esperando al mesero', 'Entregado'];
-      const states = ['recibido', 'en_preparacion', 'listo', 'entregado'];
-      const current = Math.max(0, states.indexOf(data.status));
-      const state = document.createElement('span'); state.className = 'order-status'; state.textContent = labels[current];
+      const stateLabels = { recibido: 'Recibido', en_preparacion: 'En preparación', listo: 'Listo · espera al mesero', entregado: 'Entregado', parcial: 'Entrega parcial' };
+      const state = document.createElement('span'); state.className = 'order-status'; state.textContent = stateLabels[customerOrderStatus(data)] ?? 'En proceso';
       header.append(number, state); card.append(header);
-      const progress = document.createElement('ol'); progress.className = 'order-progress';
-      labels.forEach((label, index) => { const step = document.createElement('li'); step.textContent = label; step.classList.toggle('step-complete', index <= current); step.classList.toggle('step-current', index === current); progress.append(step); });
-      card.append(progress);
       (data.items ?? []).forEach((item) => {
-        const line = document.createElement('p');
+        const line = document.createElement('article'); line.className = 'tracking-item';
+        const lineHead = document.createElement('div'); lineHead.className = 'tracking-item-head';
+        const itemName = document.createElement('strong'); itemName.textContent = `${item.quantity} × ${item.name}`;
+        const itemStatus = customerItemStatus(item, data);
+        line.classList.add(`tracking-item-state-${itemStatus}`);
+        const itemState = document.createElement('span'); itemState.className = `tracking-item-status tracking-status-${itemStatus}`;
+        const itemStatusLabels = { recibido: 'Recibido', en_preparacion: 'Preparando', listo: 'Listo para entregar', entregado: 'Entregado' };
+        itemState.textContent = itemStatusLabels[itemStatus] ?? 'Recibido';
+        lineHead.append(itemName, itemState); line.append(lineHead);
+        const mode = customerItemMode(item);
+        const station = document.createElement('small'); station.className = 'tracking-item-station';
+        station.textContent = ({ kitchen: 'Cocina', bar: 'Barra', direct: 'Entrega directa' })[mode] ?? 'Cocina';
+        line.append(station);
         const options = Object.values(item.customizations ?? {}).join(' · ');
-        line.textContent = `${item.quantity} × ${item.name}${options ? ` · ${options}` : ''}${item.note ? ` · ${item.note}` : ''}`;
+        if (options || item.note) { const detail = document.createElement('p'); detail.className = 'tracking-item-detail'; detail.textContent = [options, item.note].filter(Boolean).join(' · '); line.append(detail); }
         card.append(line);
       });
       list.append(card);
@@ -461,6 +672,7 @@ function watchTableAccount() {
     const access = snapshot.exists() ? snapshot.data() : null;
     const nextVisitId = access?.enabled === true && access.tableId === tableId.padStart(2, '0')
       && typeof access.activeVisitId === 'string' ? access.activeVisitId : null;
+    if (nextVisitId) watchInvoiceForVisit(nextVisitId, services.auth.currentUser?.uid);
     if (nextVisitId === trackedVisitId) {
       if (visitId !== nextVisitId) { visitId = nextVisitId; saveCart(); }
       return;
@@ -559,7 +771,7 @@ async function requestStaff(type) {
         .map((item) => ({ id: item.id, ...item.data() }))
         .filter((order) => String(order.tableId ?? '').padStart(2, '0') === currentTable && order.paymentStatus !== 'paid');
       if (!unpaidOrders.length) throw new Error('Aún no tienes pedidos pendientes de pago en esta mesa.');
-      const undelivered = unpaidOrders.filter((order) => order.status !== 'entregado');
+      const undelivered = unpaidOrders.filter((order) => !customerOrderDelivered(order));
       if (undelivered.length) throw new Error('Podrás solicitar la cuenta cuando el mesero haya entregado todos tus pedidos.');
       const visitIds = [...new Set(unpaidOrders.map((order) => order.visitId).filter(Boolean))];
       if (visitIds.length !== 1) throw new Error('No se pudo identificar una única cuenta para estos pedidos. Pide ayuda al personal.');
@@ -604,11 +816,11 @@ async function cancelCustomerRequest() {
 }
 
 function connectMenu() {
-  const { collection, onSnapshot, query, where } = services.firestore;
-  const menuQuery = query(collection(services.db, 'platillos'), where('available', '==', true));
-  onSnapshot(menuQuery, (snapshot) => {
+  const { collection, doc, onSnapshot } = services.firestore;
+  onSnapshot(collection(services.db, 'platillos'), (snapshot) => {
     products = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => typeof item.name === 'string' && centsFor(item) >= 0);
     products.sort((a, b) => String(a.category ?? a.categoryId ?? '').localeCompare(String(b.category ?? b.categoryId ?? ''), 'es') || String(a.name).localeCompare(String(b.name), 'es'));
+    renderRecommendations();
     menuFeedback.hidden = true; renderMenu();
   }, (error) => {
     console.error('No se pudo cargar el menú.', error);
@@ -616,11 +828,23 @@ function connectMenu() {
     menuFeedback.innerHTML = '<span class="empty-icon" aria-hidden="true">!</span><div><strong>No pudimos cargar el menú</strong><p>Comprueba tu conexión e inténtalo de nuevo.</p></div>';
     $('#menu-count').textContent = 'Menú no disponible';
   });
+  if (recommendationsStop) recommendationsStop();
+  recommendationsStop = onSnapshot(doc(services.db, 'menuRecommendations', 'current'), (snapshot) => {
+    menuRecommendations = snapshot.exists() ? snapshot.data() : {};
+    renderRecommendations(); renderMenu(); renderCart();
+  }, (error) => console.info('No se pudieron cargar las recomendaciones del menú.', error));
 }
 
 function startApp() {
   $('#table-label').textContent = /^\d{1,3}$/.test(tableId) ? `Mesa ${tableId.padStart(2, '0')}` : 'Explora el menú';
   readCart(); renderCart();
+  document.querySelectorAll('[data-menu-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      menuView = button.dataset.menuView === 'list' ? 'list' : 'grid';
+      document.querySelectorAll('[data-menu-view]').forEach((option) => option.setAttribute('aria-pressed', String(option.dataset.menuView === menuView)));
+      renderMenu();
+    });
+  });
   $('#confirm-order').addEventListener('click', confirmOrder);
   $('#order-tracking-toggle').addEventListener('click', () => {
     orderTrackingExpanded = !orderTrackingExpanded;
@@ -633,6 +857,8 @@ function startApp() {
   $('#request-bill').addEventListener('click', () => requestStaff('bill'));
   $('#cancel-request').addEventListener('click', cancelCustomerRequest);
   $('#dismiss-message').addEventListener('click', () => $('#message-dialog').close());
+  $('#download-customer-invoice').addEventListener('click', () => { if (currentInvoice) downloadInvoicePdf(currentInvoice); });
+  $('#dismiss-customer-invoice').addEventListener('click', () => $('#customer-invoice-dialog').close());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       for (const dialog of [productDialog, $('#message-dialog')]) {

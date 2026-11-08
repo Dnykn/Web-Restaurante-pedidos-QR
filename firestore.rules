@@ -8,7 +8,7 @@ service cloud.firestore {
     function isStaff() {
       return signedIn()
         && exists(/databases/$(database)/documents/staffUsers/$(request.auth.uid))
-        && get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data.role == 'staff'
+        && get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data.role in ['staff', 'mesero', 'cocina', 'admin', 'administrador', 'caja', 'chef']
         && get(/databases/$(database)/documents/staffUsers/$(request.auth.uid)).data.enabled == true;
     }
 
@@ -41,15 +41,17 @@ service cloud.firestore {
     }
 
     match /platillos/{itemId} {
-      allow get, list: if isStaff() || resource.data.available == true;
+      // El catálogo es público; los clientes necesitan leer también los
+      // productos no disponibles para mostrar el aviso correspondiente.
+      allow get, list: if true;
       allow create: if isStaff()
         && request.resource.data.keys().hasOnly([
-          'name', 'description', 'category', 'priceCents', 'imageUrl',
-          'customizationOptions', 'available', 'createdBy', 'createdAt', 'updatedAt'
+          'name', 'description', 'category', 'fulfillmentMode', 'priceCents', 'imageUrl',
+          'customizationOptions', 'available', 'availabilityMessage', 'createdBy', 'createdAt', 'updatedAt'
         ])
         && request.resource.data.keys().hasAll([
-          'name', 'description', 'category', 'priceCents', 'imageUrl',
-          'customizationOptions', 'available', 'createdBy', 'createdAt', 'updatedAt'
+          'name', 'description', 'category', 'fulfillmentMode', 'priceCents', 'imageUrl',
+          'customizationOptions', 'available', 'availabilityMessage', 'createdBy', 'createdAt', 'updatedAt'
         ])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
@@ -57,6 +59,7 @@ service cloud.firestore {
         && request.resource.data.description is string
         && request.resource.data.description.size() <= 500
         && request.resource.data.category in ['Entradas', 'Platos fuertes', 'Postres', 'Bebidas', 'Alcohol', 'Niños']
+        && request.resource.data.fulfillmentMode in ['kitchen', 'bar', 'direct']
         && request.resource.data.priceCents is int
         && request.resource.data.priceCents > 0
         && request.resource.data.priceCents <= 10000000
@@ -65,13 +68,15 @@ service cloud.firestore {
         && (request.resource.data.imageUrl == '' || request.resource.data.imageUrl.matches('https://.*'))
         && request.resource.data.customizationOptions is list
         && request.resource.data.available is bool
+        && request.resource.data.availabilityMessage is string
+        && request.resource.data.availabilityMessage.size() <= 120
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
       allow update: if isStaff()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'description', 'category', 'priceCents', 'imageUrl',
-          'customizationOptions', 'available', 'updatedAt'
+          'name', 'description', 'category', 'fulfillmentMode', 'priceCents', 'imageUrl',
+          'customizationOptions', 'available', 'availabilityMessage', 'updatedAt'
         ])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
@@ -79,6 +84,8 @@ service cloud.firestore {
         && request.resource.data.description is string
         && request.resource.data.description.size() <= 500
         && request.resource.data.category in ['Entradas', 'Platos fuertes', 'Postres', 'Bebidas', 'Alcohol', 'Niños']
+        && (!('fulfillmentMode' in request.resource.data)
+          || request.resource.data.fulfillmentMode in ['kitchen', 'bar', 'direct'])
         && request.resource.data.priceCents is int
         && request.resource.data.priceCents > 0
         && request.resource.data.priceCents <= 10000000
@@ -87,6 +94,8 @@ service cloud.firestore {
         && (request.resource.data.imageUrl == '' || request.resource.data.imageUrl.matches('https://.*'))
         && request.resource.data.customizationOptions is list
         && request.resource.data.available is bool
+        && request.resource.data.availabilityMessage is string
+        && request.resource.data.availabilityMessage.size() <= 120
         && request.resource.data.updatedAt == request.time;
       allow delete: if isStaff();
     }
@@ -95,6 +104,37 @@ service cloud.firestore {
     match /settings/restaurant {
       allow get: if true;
       allow list, create, update, delete: if false;
+    }
+
+    // Public menu display uses only aggregate sales and the currently selected
+    // daily dish/combos. Only an authenticated staff account may publish them.
+    match /menuRecommendations/current {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isStaff()
+        && request.resource.data.keys().hasOnly(['dailySpecial', 'salesByProduct', 'combos', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time
+        && (!('dailySpecial' in request.resource.data)
+          || (request.resource.data.dailySpecial is map
+            && request.resource.data.dailySpecial.keys().hasOnly(['productId', 'discountPercent', 'dateKey', 'source', 'productName'])
+            && request.resource.data.dailySpecial.productId is string
+            && request.resource.data.dailySpecial.discountPercent is int
+            && request.resource.data.dailySpecial.discountPercent >= 0
+            && request.resource.data.dailySpecial.discountPercent <= 50
+            && request.resource.data.dailySpecial.dateKey is string))
+        && (!('salesByProduct' in request.resource.data) || request.resource.data.salesByProduct is list)
+        && (!('combos' in request.resource.data) || request.resource.data.combos is list);
+      allow delete: if false;
+    }
+
+    match /menuRecommendationStats/current {
+      allow get: if isStaff();
+      allow create, update: if isStaff()
+        && request.resource.data.keys().hasOnly(['comboCandidates', 'processedOrderIds', 'updatedAt'])
+        && request.resource.data.comboCandidates is list
+        && request.resource.data.processedOrderIds is list
+        && request.resource.data.updatedAt == request.time;
+      allow list, delete: if false;
     }
 
     match /visits/{visitId} {
@@ -239,19 +279,16 @@ service cloud.firestore {
         && request.resource.data.receivedAt == request.time;
       allow update: if isStaff()
         && ((request.resource.data.updatedAt == request.time
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'status', 'preparingAt', 'readyAt', 'deliveredAt', 'updatedAt', 'updatedBy'
-            ])
             && request.resource.data.updatedBy == request.auth.uid
-            && ((resource.data.status == 'recibido'
-                  && request.resource.data.status == 'en_preparacion'
-                  && request.resource.data.preparingAt == request.time)
-              || (resource.data.status == 'en_preparacion'
-                  && request.resource.data.status == 'listo'
-                  && request.resource.data.readyAt == request.time)
-              || (resource.data.status == 'listo'
-                  && request.resource.data.status == 'entregado'
-                  && request.resource.data.deliveredAt == request.time)))
+            && request.resource.data.items is list
+            && request.resource.data.items.size() == resource.data.items.size()
+            && request.resource.data.subtotalCents == resource.data.subtotalCents
+            && request.resource.data.serviceChargeCents == resource.data.serviceChargeCents
+            && request.resource.data.totalCents == resource.data.totalCents
+            && request.resource.data.status in ['recibido', 'en_preparacion', 'listo', 'entregado']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'items', 'status', 'preparingAt', 'readyAt', 'deliveredAt', 'updatedAt', 'updatedBy'
+            ]))
           || (resource.data.status == 'entregado'
             && resource.data.paymentStatus != 'paid'
             && request.resource.data.paymentStatus == 'paid'

@@ -50,7 +50,7 @@ La configuración de la aplicación web está en `js/firebase.js`. Se usa Fireba
 
 Las categorías disponibles para platillos son `Entradas`, `Platos fuertes`, `Postres`, `Bebidas`, `Alcohol` y `Niños`. Los precios se guardan como enteros en centavos de córdoba (`priceCents`).
 
-El perfil de personal debe usar tipos correctos de Firestore: `role` como string con valor `staff`, `enabled` como booleano `true` y `displayName` como string. El documento se guarda en `staffUsers/{uid}`, usando como ID el UID de la cuenta de Authentication.
+El perfil de personal se guarda en `staffUsers/{uid}`, usando como ID el UID de la cuenta de Authentication; `enabled` debe ser booleano `true` y `displayName` una cadena. Los roles reconocidos son `cocina`, `mesero` y `admin` (se conserva `staff` como perfil administrativo anterior). La interfaz de cocina muestra Cocina y Platillos; mesero muestra Entregas, Mesas activas y Solicitudes; admin muestra todas las secciones, incluidas Métricas y Platillos del día.
 
 ## Configuración local
 

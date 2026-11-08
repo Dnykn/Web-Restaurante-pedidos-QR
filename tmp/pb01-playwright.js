@@ -1,0 +1,33 @@
+const { chromium } = require('playwright');
+const fs = require('fs');
+(async () => {
+ const browser = await chromium.launch({headless:true,executablePath:"C:/Users/Andy/AppData/Local/Packages/sandbox.{6c6e572f-2a68-49b4-a0fc-b94956b2acec}/AC/ms-playwright/chromium-1234/chrome-win64/chrome.exe"});
+ const page = await browser.newPage({viewport:{width:1440,height:1000},deviceScaleFactor:1});
+ page.on('console', msg => { if(msg.type()==='error') console.log('PAGE_ERROR:',msg.text()); });
+ await page.route('**/js/firebase.js', route => route.fulfill({status:200,contentType:'text/javascript',body:'export const auth={currentUser:{uid:"pb01-test"}}; export const db={};'}));
+ await page.route('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js', route => route.fulfill({status:200,contentType:'text/javascript',body:'export function onAuthStateChanged(auth,callback){queueMicrotask(()=>callback(auth.currentUser));return()=>{};} export async function signInAnonymously(auth){return {user:auth.currentUser};}'}));
+ const firestore = `export const collection=(db,name)=>({type:'collection',name});
+ export const doc=(db,name,id)=>({type:'doc',name,id}); export const where=(...args)=>({type:'where',args}); export const query=(ref,...args)=>({ref,args});
+ export const onSnapshot=(target,next,error)=>{const ref=target.ref||target; if(ref.name==='platillos') next({docs:[{id:'cacao',data:()=>({name:'cacao',category:'Bebidas',description:'Fresco de cacao',priceCents:2000,available:true})}]}); else if(ref.name==='settings') next({exists:()=>true,data:()=>({serviceChargeBps:0})}); else next({docs:[],exists:()=>false,data:()=>({})}); return()=>{};};
+ export const getDoc=async()=>({exists:()=>false,data:()=>({})}); export const getDocs=async()=>({docs:[]}); export const arrayUnion=(v)=>v; export const serverTimestamp=()=>Date.now(); export const setDoc=async()=>{}; export const addDoc=async()=>({id:'test'}); export const updateDoc=async()=>{}; export const runTransaction=async(db,fn)=>fn({get:async()=>({exists:()=>false,data:()=>({})}),set(){},update(){}});`;
+ await page.route('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js', route => route.fulfill({status:200,contentType:'text/javascript',body:firestore}));
+ await page.route('https://fonts.googleapis.com/**', route => route.abort()); await page.route('https://fonts.gstatic.com/**', route => route.abort());
+ await page.goto('http://127.0.0.1:8765/menu.html?mesa=01&token=pb01-fixture',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('.product-card',{timeout:10000});
+ const assert=(ok,msg)=>{if(!ok)throw Error(msg); console.log('PASS:',msg);};
+ assert(await page.locator('#confirm-order').isDisabled(),'carrito vacío: confirmar pedido está deshabilitado');
+ assert(await page.locator('#cart-lines').innerText().then(t=>t.includes('Todavía no agregas')),'carrito vacío: muestra el estado vacío');
+ await page.locator('.add-button').click();
+ await page.locator('#product-dialog .primary-button').click();
+ assert(await page.locator('#confirm-order').isEnabled(),'al agregar 1 producto: confirmar pedido queda habilitado');
+ assert((await page.locator('#cart-lines').innerText()).includes('cacao'),'al agregar: el producto aparece en el carrito');
+ await page.screenshot({path:'evidencia_pruebas/E24_PB01_carrito_con_producto.png',fullPage:true});
+ await page.locator('#cart-lines button[aria-label^="Reducir"]').click();
+ assert(await page.locator('#confirm-order').isDisabled(),'al reducir de 1 a 0: confirmar pedido vuelve a deshabilitarse');
+ assert((await page.locator('#cart-lines').innerText()).includes('Todavía no agregas'),'al reducir de 1 a 0: se elimina el último producto y vuelve el estado vacío');
+ await page.screenshot({path:'evidencia_pruebas/E25_PB01_eliminar_ultimo_producto.png',fullPage:true});
+ fs.writeFileSync('evidencia_pruebas/PB01_resultado.txt','PB-01 | Componente: ramas de carrito\nEjecución en navegador headless Chromium con dependencias de Firebase simuladas para aislar la lógica de carrito; sin escribir en Firebase.\nRamas verificadas: carrito vacío (sí), agregar producto (sí), cantidad 1 a 0 elimina la línea (sí), actualización de estado vacío tras eliminar (sí).\nResultado: 4/4 escenarios de decisión definidos para esta ejecución. Esta cifra es cobertura manual de escenarios, no un porcentaje instrumentado de sentencias del archivo completo.\nEvidencias: E24 y E25.\n');
+ console.log('PB01_RESULT: 4/4 escenarios cubiertos; fixtures Firebase aisladas.');
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});
+

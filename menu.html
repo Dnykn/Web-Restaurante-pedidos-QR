@@ -25,7 +25,19 @@
 
       <section class="menu-section" id="menu" aria-labelledby="menu-heading">
         <div class="section-heading"><div><p class="eyebrow">NUESTRA COCINA</p><h2 id="menu-heading">El menú</h2></div><p id="menu-count" class="menu-count">Cargando platos…</p></div>
-        <div id="category-list" class="category-list" role="group" aria-label="Filtrar por categoría"></div>
+        <aside id="daily-special" class="daily-special" aria-label="Platillo del día" hidden>
+          <span id="daily-special-icon" class="daily-special-icon" aria-hidden="true">✳</span>
+          <div class="daily-special-copy"><p class="eyebrow">RECOMENDACIÓN DE LA CASA</p><h3 id="daily-special-name">Platillo del día</h3><p id="daily-special-description" class="daily-special-description"></p><p id="daily-special-copy" class="daily-special-price-copy"></p></div>
+          <button id="daily-special-add" class="daily-special-badge" type="button">Ver platillo</button>
+        </aside>
+        <section id="combo-section" class="combo-section" aria-label="Combos recomendados" hidden><div class="combo-heading"><div><p class="eyebrow">JUNTOS SABEN MEJOR</p><h3>Favoritos que combinan</h3><p>Una sola elección para armar tu mesa.</p></div><span class="combo-heading-mark" aria-hidden="true">✳</span></div><div id="combo-list" class="combo-list"></div></section>
+        <div class="menu-toolbar">
+          <div id="category-list" class="category-list" role="group" aria-label="Filtrar por categoría"></div>
+          <div class="menu-view-toggle" role="group" aria-label="Vista del menú">
+            <button type="button" class="menu-view-button" data-menu-view="grid" aria-pressed="true" aria-label="Ver menú en cuadrícula">Cuadrícula</button>
+            <button type="button" class="menu-view-button" data-menu-view="list" aria-pressed="false" aria-label="Ver menú en lista">Lista</button>
+          </div>
+        </div>
         <div id="menu-feedback" class="feedback-card" aria-live="polite"><span class="loading-wheel"></span><div><strong>Cargando el menú</strong><p>Estamos buscando algo rico para ti.</p></div></div>
         <div id="product-grid" class="product-grid"></div>
       </section>
@@ -37,6 +49,7 @@
 
     <dialog id="product-dialog" class="sheet-dialog" aria-labelledby="product-title"><form method="dialog" class="dialog-close-row"><button class="icon-button" aria-label="Cerrar">×</button></form><div id="product-detail"></div></dialog>
     <dialog id="message-dialog" class="message-dialog" aria-labelledby="message-title"><form method="dialog" class="dialog-close-row"><button class="icon-button" aria-label="Cerrar">×</button></form><div class="dialog-body"><p class="eyebrow">MESAEXPRESS</p><h2 id="message-title">Ayuda y cuenta</h2><p id="message-copy">¿Qué necesitas? Avisaremos al equipo de tu mesa.</p><p id="request-feedback" class="order-feedback" role="status" aria-live="polite"></p><div id="request-actions" class="request-actions"><button id="request-help" class="secondary-button" type="button">Solicitar ayuda</button><button id="request-bill" class="primary-button" type="button">Solicitar cuenta</button></div><button id="cancel-request" class="secondary-button" type="button" hidden>Cancelar solicitud pendiente</button><button id="dismiss-message" class="message-dismiss" type="button">Cerrar</button></div></dialog>
+    <dialog id="customer-invoice-dialog" class="message-dialog invoice-dialog" aria-labelledby="customer-invoice-title"><form method="dialog" class="dialog-close-row"><button class="icon-button" aria-label="Cerrar factura">×</button></form><div class="dialog-body"><p class="eyebrow">CUENTA PAGADA</p><h2 id="customer-invoice-title">Tu factura está lista</h2><p>La cuenta de esta visita fue pagada. Puedes descargar el comprobante en PDF.</p><div id="customer-invoice-content"></div><button id="download-customer-invoice" class="primary-button invoice-download-button" type="button">Descargar factura PDF</button><button id="dismiss-customer-invoice" class="message-dismiss" type="button">Cerrar</button></div></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="./js/app.js"></script>
   </body>
