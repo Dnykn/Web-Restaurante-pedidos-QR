@@ -242,6 +242,17 @@ button { color: inherit; }
 .message-dialog { width: min(100%, 440px); inset: 50% auto auto 50%; border-radius: 22px; padding-bottom: 18px; transform: translate(-50%, -50%); }
 .message-dialog .dialog-body { padding-top: 6px; }
 .message-dialog .dialog-body > p:not(.eyebrow) { margin: 13px 0 22px; color: #79857c; font-size: 13px; line-height: 1.6; }
+.menu-tutorial-dialog { width: min(100% - 28px, 480px); }
+.menu-tutorial-dialog .dialog-body { padding: 6px 28px 12px; }
+.menu-tutorial-dialog .eyebrow { display: flex; justify-content: space-between; gap: 12px; }
+.menu-tutorial-dialog .eyebrow span { color: #a0aa9e; letter-spacing: .08em; }
+.menu-tutorial-dialog .dialog-body > p:not(.eyebrow) { min-height: 62px; }
+.tutorial-progress { height: 4px; overflow: hidden; border-radius: 999px; background: #e7ebe3; }
+.tutorial-progress span { display: block; width: 25%; height: 100%; border-radius: inherit; background: #71926a; transition: width .2s ease; }
+.tutorial-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; margin-top: 17px; }
+.tutorial-actions button { justify-content: center; margin: 0; }
+.tutorial-actions button:disabled { visibility: hidden; }
+.menu-tutorial-dialog .message-dismiss { margin-top: 8px; }
 .invoice-dialog { width: min(100% - 24px, 560px); max-height: min(90dvh, 850px); }
 .invoice-dialog .dialog-body { padding-top: 6px; }
 .invoice-preview { padding: 16px; border: 1px solid #e3e8df; border-radius: 15px; background: #fff; color: #25362f; }
